@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Unotron Wartung - Bosch V1.1</title>
+    <title>Unotron Wartung - Bosch V1.2</title>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
@@ -11,8 +11,8 @@
     
     <style>
         :root { 
-            --bosch-red: #d50000; --bosch-blue: #003a6c; --bosch-light-blue: #00b5e2; 
-            --bosch-green: #008a4f; --bosch-gray: #eff1f2;
+            --bosch-red: #d50000; --bosch-dark-red: #8b0000; --bosch-blue: #003a6c; 
+            --bosch-green: #008a4f; --bosch-gray: #eff1f2; --bosch-orange: #ffa500;
         }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bosch-gray); margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
@@ -35,11 +35,12 @@
         .btn-primary { background: var(--bosch-blue); color: white; border: none; }
         .btn-wp { background: var(--bosch-red); color: white; border: none; }
         
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+        .critical-pulse { animation: pulse 1.5s infinite; }
+
         .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 4000; }
         .modal-box { background: white; padding: 30px; border-top: 8px solid var(--bosch-red); width: 420px; text-align: center; }
         input { width: 100%; padding: 10px; margin: 8px 0; box-sizing: border-box; border: 1px solid #ddd; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
-        .pulse { animation: pulse 1.5s infinite; }
     </style>
 </head>
 <body>
@@ -59,7 +60,7 @@
     </div>
 
     <div class="header">
-        <div><span class="bosch-text">BOSCH</span><span style="color:#525f6b; font-weight:bold; margin-left:8px;">UNO-V1.1</span></div>
+        <div><span class="bosch-text">BOSCH</span><span style="color:#525f6b; font-weight:bold; margin-left:8px;">UNO-V1.2</span></div>
         <button id="authBtn" class="nav-btn" onclick="openModal()">🔑 Login</button>
     </div>
 
@@ -85,7 +86,6 @@
     <input type="file" id="fileInput" style="display:none" accept=".json">
 
     <script>
-        // Intervalle inkl. WP Reset bei 104.000 (Index 18)
         const UNO_STEPS = [
             { total: 2000, pkg: "P1, P2" }, { total: 4000, pkg: "P3" }, { total: 10000, pkg: "P1" },
             { total: 14000, pkg: "P5" }, { total: 18000, pkg: "P1, P2" }, { total: 26000, pkg: "P1" },
@@ -93,7 +93,7 @@
             { total: 42000, pkg: "P1" }, { total: 50000, pkg: "P1, P2" }, { total: 56000, pkg: "P3" },
             { total: 58000, pkg: "P1" }, { total: 66000, pkg: "P1, P2" }, { total: 74000, pkg: "P1" },
             { total: 82000, pkg: "P1, P2" }, { total: 90000, pkg: "P3" }, { total: 98000, pkg: "P1" },
-            { total: 104000, pkg: "WP RESET" } // Index 18
+            { total: 104000, pkg: "WP RESET" } 
         ];
 
         const firebaseConfig = {
@@ -138,10 +138,21 @@
                 const ist = parseInt(item["COUNT(*)"] || 0);
                 const cIdx = state.extraCycles[id] || 0;
                 
+                const prevTotal = cIdx > 0 ? UNO_STEPS[cIdx-1].total : 0;
                 const target = UNO_STEPS[cIdx] || { total: 104000 + ((cIdx - 18) * 5000), pkg: "Folge" };
+                const intervalSize = target.total - prevTotal;
                 const rest = target.total - ist;
                 
-                return { id, rest, color: rest <= 0 ? "#8b0000" : (rest < 2000 ? "#ffa500" : "#008a4f"), ist, cIdx, pkg: target.pkg, target: target.total };
+                // Prozentualer Restwert im aktuellen Intervall
+                const restPercent = (rest / intervalSize) * 100;
+
+                // Deine neuen Regeln:
+                let statusColor = "#008a4f"; // Grün
+                if (rest <= 0) statusColor = "#8b0000"; // Dunkelrot
+                else if (restPercent <= 3.125) statusColor = "#d50000"; // Rot
+                else if (restPercent <= 12.5) statusColor = "#ffa500"; // Gelb
+                
+                return { id, rest, color: statusColor, ist, cIdx, pkg: target.pkg, target: target.total, restPercent };
             }).sort((a, b) => a.rest - b.rest);
 
             const list = document.getElementById('machineList'), logged = !!auth.currentUser;
@@ -153,7 +164,7 @@
                         <button class="nav-btn btn-wp" title="WP Reset" onclick="setWP('${d.id}')">WP</button>
                         <button class="nav-btn" onclick="changeCycle('${d.id}', -1)">-</button>
                         <span style="min-width: 15px; text-align: center">${d.cIdx}</span>
-                        <button class="nav-btn" onclick="changeCycle('${d.id}', 1)">+</button>
+                        <button class="nav-btn" ${d.restPercent > 12.5 && d.rest > 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''} onclick="changeCycle('${d.id}', 1)">+</button>
                     </div>
                 </div>
             `).join('');
@@ -167,7 +178,7 @@
 
         async function setWP(id) {
             if(confirm("Wartungsplan Reset für UNO-" + id + " ausführen?")) {
-                await db.ref(`maintenanceStateUnotron/extraCycles/${id}`).set(18); // Setzt auf 104.000
+                await db.ref(`maintenanceStateUnotron/extraCycles/${id}`).set(18); 
             }
         }
 
@@ -180,7 +191,13 @@
                     labels: data.map(d => "U" + d.id),
                     datasets: [{ data: data.map(d => d.rest), backgroundColor: data.map(d => d.color) }]
                 },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                options: { 
+                    responsive: true, maintainAspectRatio: false, 
+                    plugins: { 
+                        legend: { display: false },
+                        datalabels: { anchor: 'end', align: 'top', formatter: v => v.toLocaleString(), font: { weight: 'bold' } }
+                    } 
+                }
             });
         }
 

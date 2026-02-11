@@ -17,9 +17,8 @@
         .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; padding: 20px; flex: 1; overflow: hidden; }
         .column { background: white; border-top: 5px solid var(--bosch-blue); display: flex; flex-direction: column; overflow: hidden; border-radius: 4px; }
         .col-header { padding: 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; font-weight: bold; font-size: 1.1em; display: flex; justify-content: space-between; align-items: center; }
-        .col-header a { text-decoration: none; color: inherit; cursor: pointer; transition: color 0.2s; }
-        .col-header a:hover { color: var(--bosch-red); }
-        .time-badge { font-size: 0.8em; color: var(--bosch-red); background: #ffeeee; padding: 2px 8px; border-radius: 12px; border: 1px solid #ffcccc; white-space: nowrap; }
+        .col-header a { text-decoration: none; color: inherit; cursor: pointer; }
+        .time-badge { font-size: 0.8em; color: var(--bosch-red); background: #ffeeee; padding: 2px 8px; border-radius: 12px; border: 1px solid #ffcccc; }
         .machine-list { flex: 1; overflow-y: auto; padding: 10px; }
         .card { padding: 12px; border-bottom: 1px solid #eee; border-left: 8px solid #ccc; margin-bottom: 8px; background: #fff; position: relative; }
         .card.warning { border-left-color: #ffa500; } 
@@ -33,7 +32,7 @@
         .m-rest { font-weight: bold; font-size: 1.1em; } 
         .m-paket { font-size: 0.85em; color: var(--bosch-red); font-weight: bold; margin-top: 2px; } 
         .m-time { font-size: 0.75em; color: #666; font-style: italic; margin-top: 4px; }
-        select { width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 2px; margin-top: 8px; font-size: 0.9em; }
+        select { width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 2px; margin-top: 8px; }
         .nav-btn { padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; color: var(--bosch-blue); border-radius: 2px; }
         .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 4000; }
         .modal-box { background: white; padding: 30px; border-top: 8px solid var(--bosch-red); width: 450px; border-radius: 4px; }
@@ -49,7 +48,7 @@
     <div><span style="color:var(--bosch-red);font-weight:900;font-size:24px;">BOSCH</span> <span style="font-weight:bold;margin-left:10px;color:#555;">Statusübersicht</span></div>
     <div style="display:flex; gap:10px;">
         <button class="nav-btn" onclick="document.getElementById('helpModal').style.display='flex'">ℹ️ Hilfe</button>
-        <button id="authBtn" class="nav-btn" onclick="handleLoginClick()">🔑 Login</button>
+        <button id="authBtn" class="nav-btn" onclick="handleAuth()">🔑 Login</button>
         <button class="nav-btn" onclick="openAdminModal()">⚙️ Einsteller</button>
     </div>
 </div>
@@ -58,21 +57,21 @@
     <div class="column">
         <div class="col-header">
             <a onclick="window.open('https://norman8410.github.io/Wartungs-Dashboard-W430V3/agie.html','_blank')">⚡ Agie ➔</a>
-            <div id="count-agie" style="display:flex; align-items:center; gap:8px;">0</div>
+            <div id="count-agie">0</div>
         </div>
         <div class="machine-list" id="list-agie"></div>
     </div>
     <div class="column" style="border-top-color: var(--bosch-green);">
         <div class="col-header">
             <a onclick="window.open('https://norman8410.github.io/unotron-wartung/','_blank')">🧪 Unotron ➔</a>
-            <div id="count-uno" style="display:flex; align-items:center; gap:8px;">0</div>
+            <div id="count-uno">0</div>
         </div>
         <div class="machine-list" id="list-uno"></div>
     </div>
     <div class="column" style="border-top-color: #007bc0;">
         <div class="col-header">
             <a onclick="window.open('https://norman8410.github.io/HE-Wartung/','_blank')">⚙️ HE ➔</a>
-            <div id="count-he" style="display:flex; align-items:center; gap:8px;">0</div>
+            <div id="count-he">0</div>
         </div>
         <div class="machine-list" id="list-he"></div>
     </div>
@@ -83,7 +82,6 @@
 <div id="helpModal" class="modal">
     <div class="modal-box">
         <h2 style="color:var(--bosch-blue); border-bottom: 2px solid var(--bosch-red); padding-bottom: 10px;">System-Hilfe</h2>
-        <p><strong>Auto-Logout:</strong> Erfolgt nach 70s Inaktivität.</p>
         <p>Den Einladungscode erhalten Sie von Ihrem TL, FK oder Admin.</p>
         <p><strong>Verantwortlich: Norman Schultheis</strong></p>
         <button class="nav-btn" style="width:100%; margin-top:20px; background:var(--bosch-blue); color:white; border:none;" onclick="document.getElementById('helpModal').style.display='none'">Schließen</button>
@@ -110,17 +108,14 @@
         if (totalMinutes < 60) return totalMinutes + " Min.";
         const hours = Math.floor(totalMinutes / 60);
         const mins = totalMinutes % 60;
-        if (hours < 24) {
-            return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-        } else {
-            const days = Math.floor(hours / 24);
-            const remHours = hours % 24;
-            return remHours > 0 ? `${days}T ${remHours}h` : `${days}T`;
-        }
+        if (hours < 24) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+        const days = Math.floor(hours / 24);
+        const remH = hours % 24;
+        return remH > 0 ? `${days}T ${remH}h` : `${days}T`;
     }
 
     function getDuration(pkgString, timeTable) {
-        if (!pkgString || pkgString.includes("AUSTAUSCH") || pkgString.includes("RESET") || !timeTable) return 0;
+        if (!pkgString || pkgString.includes("RESET") || !timeTable) return 0;
         return pkgString.split('/').reduce((acc, p) => {
              let key = p.toUpperCase().trim(); 
              if(!key.startsWith("P")) key = "P" + key;
@@ -135,7 +130,30 @@
         }
     }
 
-    // --- FIREBASE LISTENERS ---
+    // --- AUTH LOGIK (NEU) ---
+
+    async function handleAuth() {
+        if(auth.currentUser) {
+            auth.signOut();
+        } else {
+            const userInput = prompt("Bitte Einladungscode eingeben:");
+            if(!userInput) return;
+
+            // Code aus Firebase prüfen
+            const snap = await db.ref('config/inviteCode').once('value');
+            const correctCode = snap.val();
+
+            if(userInput === correctCode) {
+                auth.signInAnonymously()
+                    .then(() => alert("Erfolgreich angemeldet!"))
+                    .catch(e => alert("Fehler: " + e.message));
+            } else {
+                alert("Falscher Einladungscode!");
+            }
+        }
+    }
+
+    // --- LISTENERS ---
 
     db.ref('maintenanceConfig').on('value', s => { state.maintConfig = s.val() || {}; updateUI(); });
     db.ref('maintenanceState').on('value', s => { state.agie = s.val() || {}; updateUI(); });
@@ -150,7 +168,7 @@
         updateUI();
     });
 
-    // --- UI RENDERING ---
+    // --- RENDERING ---
 
     function updateUI() {
         if(!state.maintConfig.agie) return; 
@@ -161,89 +179,48 @@
 
     function renderCol(listId, countId, rawData, prefix, machineCfg) {
         if(!rawData || !rawData.cloudRawData || !machineCfg) return;
-        
-        let totalMinutes = 0;
+        let totalMin = 0;
 
-        const processedData = rawData.cloudRawData.map(item => {
+        const data = rawData.cloudRawData.map(item => {
             const sId = item.StationNo || item.STATIONNO;
             if(!sId) return null;
-            
-            const cycleIdx = (rawData.extraCycles && rawData.extraCycles[sId]) || 0;
-            const offKey = prefix==='A' ? 'agieOffsets' : (prefix==='H' ? 'heOffsets' : 'unotronOffsets');
-            const offset = (rawData[offKey] && rawData[offKey][sId]) || 0;
-            const istValue = (parseInt(item.Parts || item["COUNT(*)"]) || 0) - offset;
-            
-            const step = machineCfg.steps[cycleIdx] || { target: machineCfg.maxLimit, pkg: "AUSTAUSCH" };
-            const isOver = istValue >= machineCfg.maxLimit;
-            const target = isOver ? machineCfg.maxLimit : step.target;
-            const pkgName = isOver ? "WP RESET" : step.pkg;
-            const rest = target - istValue;
-            const duration = getDuration(pkgName, machineCfg.times);
+            const cyc = (rawData.extraCycles && rawData.extraCycles[sId]) || 0;
+            const offKey = prefix==='A'?'agieOffsets':(prefix==='H'?'heOffsets':'unotronOffsets');
+            const ist = (parseInt(item.Parts || item["COUNT(*)"]) || 0) - ((rawData[offKey] && rawData[offKey][sId]) || 0);
+            const step = machineCfg.steps[cyc] || { target: machineCfg.maxLimit, pkg: "RESET" };
+            const rest = (ist >= machineCfg.maxLimit ? machineCfg.maxLimit : step.target) - ist;
+            const dur = getDuration(ist >= machineCfg.maxLimit ? "RESET" : step.pkg, machineCfg.times);
+            if(rest < machineCfg.warn) totalMin += dur;
 
-            // Zeit nur für fällige Maschinen summieren
-            if (rest < machineCfg.warn) {
-                totalMinutes += duration;
-            }
-
-            return { 
-                id: prefix + "-" + sId, 
-                key: prefix + sId,
-                rest: rest, 
-                pkg: pkgName, 
-                duration: duration,
-                warn: machineCfg.warn, 
-                crit: machineCfg.crit 
-            };
+            return { id: prefix+"-"+sId, key: prefix+sId, rest, pkg: step.pkg, dur, warn: machineCfg.warn, crit: machineCfg.crit };
         }).filter(m => m && m.rest < m.warn).sort((a,b) => a.rest - b.rest);
 
-        // Header Update: Anzahl + Zeit
-        const timeBadge = totalMinutes > 0 ? `<span class="time-badge">⏳ ${formatTotalTime(totalMinutes)}</span>` : "";
-        document.getElementById(countId).innerHTML = `<span>${processedData.length}</span> ${timeBadge}`;
+        const timeStr = totalMin > 0 ? `<span class="time-badge">⏳ ${formatTotalTime(totalMin)}</span>` : "";
+        document.getElementById(countId).innerHTML = `<span>${data.length}</span> ${timeStr}`;
 
-        // Liste Update
-        document.getElementById(listId).innerHTML = processedData.map(m => {
-            const assigned = state.assignments[m.key] || "";
-            const isWorking = assigned !== "";
-            const statusClass = (m.rest <= 0 && !isWorking) ? 'blink overdue' : (m.rest <= 0 ? 'overdue' : (m.rest < m.crit ? 'critical' : 'warning'));
-            
+        document.getElementById(listId).innerHTML = data.map(m => {
+            const ass = state.assignments[m.key] || "";
+            const isW = ass !== "";
+            const cls = (m.rest <= 0 && !isW) ? 'blink overdue' : (m.rest <= 0 ? 'overdue' : (m.rest < m.crit ? 'critical' : 'warning'));
             return `
-            <div class="card ${statusClass} ${isWorking?'in-progress':''}">
+            <div class="card ${cls} ${isW?'in-progress':''}">
                 <div class="card-info">
-                    <div>
-                        <div class="m-id">${m.id}</div>
-                        <div class="m-paket">${m.pkg}</div>
-                        ${m.duration > 0 ? `<div class="m-time">⏱ ca. ${m.duration} Min.</div>` : ''}
-                    </div>
+                    <div><b>${m.id}</b><br><span class="m-paket">${m.pkg}</span><br><span class="m-time">⏱ ${m.dur} Min.</span></div>
                     <div class="m-rest">${m.rest.toLocaleString()}</div>
                 </div>
                 <select ${!auth.currentUser?'disabled':''} onchange="db.ref('dashboardAssignments/${m.key}').set(this.value)">
                     <option value="">-- Einsteller --</option>
-                    ${(state.config.einstellerListe||[]).map(e => `<option value="${e}" ${assigned===e?'selected':''}>${e}</option>`).join('')}
+                    ${(state.config.einstellerListe||[]).map(e => `<option value="${e}" ${ass===e?'selected':''}>${e}</option>`).join('')}
                 </select>
             </div>`;
         }).join('');
     }
 
-    function handleLoginClick() {
-        if(auth.currentUser) auth.signOut();
-        else {
-            const code = prompt("Einladungscode eingeben:");
-            if(code === "bosch2026") {
-                auth.signInAnonymously().catch(e => alert("Fehler: " + e.message));
-            } else {
-                alert("Falscher Code.");
-            }
-        }
-    }
-
     function openAdminModal() {
         if(!auth.currentUser) return alert("Bitte erst einloggen!");
-        const currentList = (state.config.einstellerListe || []).join('\n');
-        const newList = prompt("Einsteller-Liste (einer pro Zeile):", currentList);
-        if(newList !== null) {
-            const arr = newList.split('\n').map(s => s.trim()).filter(s => s !== "");
-            db.ref('config/einstellerListe').set(arr);
-        }
+        const current = (state.config.einstellerListe || []).join('\n');
+        const next = prompt("Einsteller-Liste (einer pro Zeile):", current);
+        if(next !== null) db.ref('config/einstellerListe').set(next.split('\n').map(s => s.trim()).filter(s => s !== ""));
     }
 </script>
 </body>

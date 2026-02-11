@@ -159,53 +159,74 @@
     function toggleAuthModal(){ if(auth.currentUser){auth.signOut();return;} document.getElementById('authModal').style.display='flex'; }
     function switchAuthMode(){ state.isRegMode=!state.isRegMode; document.getElementById('modalTitle').innerText=state.isRegMode?"Registrieren":"Login"; document.getElementById('mainAuthBtn').innerText=state.isRegMode?"Account erstellen":"Anmelden"; document.getElementById('inviteGroup').style.display=state.isRegMode?"block":"none"; }
     async function processAuth(){ const e=document.getElementById('authEmail').value,p=document.getElementById('authPass').value; if(state.isRegMode){ const i=document.getElementById('authInvite').value, s=await db.ref('config/inviteCode').once('value'); if(i!==s.val())return alert("Code falsch!"); auth.createUserWithEmailAndPassword(e,p).then(()=>location.reload()).catch(e=>alert(e.message)); }else{ auth.signInWithEmailAndPassword(e,p).then(()=>document.getElementById('authModal').style.display='none').catch(e=>alert(e.message)); } }
-    // --- ADMIN / EINSTELLER LOGIK ---
+// --- ADMIN / EINSTELLER LOGIK ---
 
-    function openAdminModal() {
-        document.getElementById('adminModal').style.display = 'flex';
-        // Reset View
-        document.getElementById('adminLoginView').style.display = 'block';
-        document.getElementById('adminManagerView').style.display = 'none';
-        document.getElementById('adminPWInput').value = '';
+function openAdminModal() {
+    document.getElementById('adminModal').style.display = 'flex';
+    // Punkt 1: Passwortfeld beim Öffnen IMMER leeren
+    document.getElementById('AdminPWInput').value = ''; 
+    
+    document.getElementById('adminLoginView').style.display = 'block';
+    document.getElementById('adminManagerView').style.display = 'none';
+}
+
+function closeAdminModal() {
+    document.getElementById('adminModal').style.display = 'none';
+    // Sicherheit: Auch beim Schließen leeren
+    document.getElementById('AdminPWInput').value = '';
+}
+
+async function checkAdminPW() {
+    const input = document.getElementById('AdminPWInput').value;
+    const snap = await db.ref('config/AdminPW').once('value');
+    const realPW = snap.val();
+
+    if (input === realPW) {
+        document.getElementById('adminLoginView').style.display = 'none';
+        document.getElementById('adminManagerView').style.display = 'block';
+        renderAdminList();
+    } else {
+        alert("Falsches Passwort!");
+        document.getElementById('AdminPWInput').value = ''; // Bei Fehler auch leeren
     }
+}
 
-    function closeAdminModal() {
-        document.getElementById('adminModal').style.display = 'none';
-    }
+function renderAdminList() {
+    const list = state.config.einstellerListe || [];
+    
+    // Punkt 2: Nach Nachnamen sortieren
+    list.sort((a, b) => a.localeCompare(b));
 
-    async function checkAdminPW() {
-        const input = document.getElementById('AdminPWInput').value;
-        const snap = await db.ref('config/AdminPW').once('value');
-        const realPW = snap.val();
-
-        if (input === realPW) {
-            document.getElementById('adminLoginView').style.display = 'none';
-            document.getElementById('adminManagerView').style.display = 'block';
-            renderAdminList();
-        } else {
-            alert("Falsches Passwort!");
+    const ul = document.getElementById('adminEinstellerList');
+    ul.innerHTML = list.map(name => {
+        // Punkt 3: Formatierung "Nachname Vo."
+        const parts = name.split(' ');
+        let display = name;
+        if (parts.length >= 2) {
+            const nachname = parts[0];
+            const vorname = parts.slice(1).join(' ');
+            display = `<b>${nachname}</b> ${vorname.substring(0, 2)}.`;
         }
+        return `<li>${display}</li>`;
+    }).join('');
+}
+
+// NEU: Schutzfunktion für das Dropdown im Dashboard
+async function handleEinstellerChange(prefix, sId, value) {
+    if (value === "") {
+        db.ref(`dashboardAssignments/${prefix}${sId}`).set("");
+        return;
     }
 
-    function renderAdminList() {
-        const list = state.config.einstellerListe || [];
-        // Sortieren nach Nachname (String Vergleich)
-        list.sort((a, b) => a.localeCompare(b));
-
-        const ul = document.getElementById('adminEinstellerList');
-        ul.innerHTML = list.map(name => {
-            // Formatierung: "Dütsch Bernd" -> "Dütsch Be."
-            const parts = name.split(' ');
-            let display = name;
-            if (parts.length >= 2) {
-                const nachname = parts[0];
-                const vorname = parts.slice(1).join(' '); // Falls Vorname aus mehreren Teilen besteht
-                display = `<b>${nachname}</b> ${vorname.substring(0, 2)}.`;
-            }
-            return `<li>${display}</li>`;
-        }).join('');
+    const pw = prompt("Bitte Admin-Passwort eingeben, um Einsteller zuzuweisen:");
+    const snap = await db.ref('config/AdminPW').once('value');
+    if (pw === snap.val()) {
+        db.ref(`dashboardAssignments/${prefix}${sId}`).set(value);
+    } else {
+        alert("Falsches Passwort! Änderung nicht übernommen.");
+        updateUI(); // UI zurücksetzen, um Auswahl auf vorherigen Wert zu stellen
     }
-
+}
     async function addEinsteller() {
         const n = document.getElementById('newNachname').value.trim();
         const v = document.getElementById('newVorname').value.trim();
@@ -292,10 +313,10 @@
                     <div class="m-rest">${m.rest.toLocaleString()}</div>
                 </div>
                 <div class="card-actions">
-                    <select ${!auth.currentUser?'disabled':''} onchange="db.ref('dashboardAssignments/${prefix}${m.sId}').set(this.value)">
-                        <option value="">-- Einsteller --</option>
-                        ${(state.config.einstellerListe||[]).map(e => `<option value="${e}" ${ass===e?'selected':''}>${e}</option>`).join('')}
-                    </select>
+                    <select ${!auth.currentUser?'disabled':''} onchange="handleEinstellerChange('${prefix}', '${m.sId}', this.value)">
+    			<option value="">-- Einsteller --</option>
+    			${(state.config.einstellerListe||[]).map(e => `<option value="${e}" ${ass===e?'selected':''}>${e}</option>`).join('')}
+		    </select>
                     <button class="${btnClass}" 
                         ${isDisabled || !auth.currentUser ? 'disabled' : ''} 
                         onclick="confirmMaint('${prefix}', '${m.sId}', ${m.isReset}, ${m.rawTotal})">

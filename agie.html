@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Agie Wartung - Master (mit Zeitberechnung)</title>
+    <title>Agie Wartung - Master System</title>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
@@ -19,16 +19,17 @@
         .main-layout { display: flex; flex: 1; padding: 20px; gap: 20px; overflow: hidden; }
         .chart-area { flex: 3; background: white; padding: 20px; border-top: 4px solid var(--bosch-blue); border-radius: 4px; position: relative; }
         .sidebar { flex: 1.5; background: white; border-top: 4px solid var(--bosch-blue); overflow-y: auto; padding: 10px; border-radius: 4px; }
-        .row { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; gap: 10px; border-left: 8px solid #ccc; margin-bottom: 5px; }
+        .row { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; gap: 10px; border-left: 8px solid #ccc; margin-bottom: 5px; transition: 0.2s; }
+        .row:hover { background: #f9f9f9; }
         .btn-cycle { padding: 8px 12px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; border-radius: 2px; }
-        .btn-reset-auto { background: var(--bosch-red); color: white; border: none; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; }
+        .btn-reset-auto { background: var(--bosch-red); color: white; border: none; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 2px; }
         @keyframes blink-red { 0% { background: #fff; } 50% { background: #ffcccc; } 100% { background: #fff; } }
         .blink { animation: blink-red 1s infinite; }
     </style>
 </head>
 <body onmousemove="resetTimer()">
 
-<div class="top-bar">Agie Wartungsübersicht</div>
+<div class="top-bar">Agie Wartungsübersicht (Dynamisch)</div>
 <div class="header">
     <div><span style="font-size: 24px; color: var(--bosch-red); font-weight: 900;">BOSCH</span></div>
     <button style="padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; color: var(--bosch-blue);" onclick="window.close()">❌ Schließen</button>
@@ -40,9 +41,10 @@
 </div>
 
 <script>
-    // --- KONFIGURATION ---
+    // --- 1. ZEIT-TABELLE (Werte aus deiner CSV) ---
     const TIMES = { "P1": 60, "P2": 75, "P3": 10, "P4": 220, "P5": 200, "P6": 40, "P7": 345 };
     
+    // --- 2. WARTUNGSINTERVALLE (16.000er Schritte) ---
     const AGIE_STEPS = [
         {target: 16000, pkg: "P1/2"}, {target: 32000, pkg: "P1/3"}, {target: 48000, pkg: "P1/2"},
         {target: 64000, pkg: "P1/4"}, {target: 80000, pkg: "P1/2/3"}, {target: 96000, pkg: "P1/5"},
@@ -52,6 +54,7 @@
     ];
     const MAX_LIMIT = 220000;
 
+    // --- 3. FIREBASE SETUP ---
     const firebaseConfig = { 
         apiKey: "AIzaSyD6xGCtU-felOyO_BRsFnVlB4yhC46FgYg", 
         authDomain: "bosch-agie-wartung.firebaseapp.com", 
@@ -68,14 +71,13 @@
         inactivityTimer = setTimeout(() => { window.close(); }, 70000);
     }
 
-    // Hilfsfunktion zur Berechnung der Summenzeit
+    // Hilfsfunktion zur Zeitberechnung (P1/2 -> 60+75=135)
     function getDuration(pkgString) {
         if (!pkgString || pkgString.includes("RESET")) return 0;
-        // Zerlegt "P1/2/3" in ["P1", "2", "3"] -> macht daraus ["P1", "P2", "P3"]
         const parts = pkgString.split('/');
         let total = 0;
-        parts.forEach((p, index) => {
-            const key = (index === 0) ? p : "P" + p;
+        parts.forEach((p, idx) => {
+            const key = idx === 0 ? p : "P" + p;
             total += (TIMES[key] || 0);
         });
         return total;
@@ -83,6 +85,7 @@
 
     auth.onAuthStateChanged(user => { currentUser = user; });
 
+    // --- 4. DATENVERARBEITUNG ---
     db.ref('maintenanceState').on('value', snap => {
         const val = snap.val() || {};
         const raw = val.cloudRawData || [];
@@ -95,18 +98,23 @@
             
             const tot = parseInt(item.Parts) || 0;
             const off = offsets[id] || 0;
-            const ist = tot - off;
-            const cyc = cycles[id] || 0;
+            const ist = tot - off; // Die tatsächlich gelaufenen Teile seit letztem Austausch
+            const cyc = cycles[id] || 0; // Der aktuelle Klick-Stand
             
-            const step = AGIE_STEPS[cyc] || { target: MAX_LIMIT, pkg: "RESET" };
+            const step = AGIE_STEPS[cyc] || { target: MAX_LIMIT, pkg: "AUSTAUSCH" };
             const isOverMax = ist >= MAX_LIMIT;
             
-            const currentPkg = isOverMax ? "WP RESET / AUSTAUSCH" : step.pkg;
             const duration = getDuration(step.pkg);
             const targetVal = isOverMax ? MAX_LIMIT : step.target;
             const rest = targetVal - ist;
 
-            return { id, rest, ist, tot, cyc, pkg: currentPkg, duration, needsReset: isOverMax, color: getC(rest, isOverMax) };
+            return { 
+                id, rest, ist, tot, cyc, 
+                pkgLabel: isOverMax ? "AUSTAUSCH ERFORDERLICH" : "Offen: " + step.pkg,
+                duration, 
+                needsReset: isOverMax, 
+                color: getC(rest, isOverMax) 
+            };
         }).filter(d => d !== null).sort((a,b) => a.rest - b.rest);
 
         renderList(data);
@@ -120,41 +128,50 @@
         return "#008a4f";
     }
 
+    // --- 5. UI RENDERING ---
     function renderList(data) {
         document.getElementById('machineList').innerHTML = data.map(d => `
             <div class="row ${d.rest <= 0 ? 'blink' : ''}" style="border-left-color:${d.color}">
                 <div style="flex:2">
                     <b>A-${d.id}</b><br>
                     <small style="color:var(--bosch-red); font-weight:bold">
-                        ${d.pkg} ${d.duration > 0 ? '(' + d.duration + ' Min.)' : ''}
+                        ${d.pkgLabel} ${d.duration > 0 ? '(' + d.duration + ' Min.)' : ''}
                     </small>
                 </div>
-                <div style="flex:1; text-align:right;"><b>${d.rest.toLocaleString()}</b></div>
+                <div style="flex:1; text-align:right; font-size: 14px;">Rest:<br><b>${d.rest.toLocaleString()}</b></div>
                 <div style="display:${currentUser ? 'flex' : 'none'}; gap:5px; margin-left:10px;">
                     ${d.needsReset ? 
-                        `<button class="btn-reset-auto" onclick="autoReset('${d.id}', ${d.tot})">Reset</button>` :
+                        `<button class="btn-reset-auto" onclick="autoReset('${d.id}', ${d.tot})">AUSTAUSCH</button>` :
                         `<button class="btn-cycle" onclick="changeC('${d.id}', 1)">+</button>`
                     }
                 </div>
             </div>`).join('');
     }
 
+    // --- 6. AKTIONEN ---
     async function changeC(id, v) {
         if(!currentUser) return;
         const ref = db.ref(`maintenanceState/extraCycles/${id}`);
         const snap = await ref.once('value');
         const newVal = (snap.val() || 0) + v;
-        await db.ref(`dashboardAssignments/A${id}`).set(""); // Verteilung aufheben
+        
+        // Logik: Bei Klick wird die Maschine aus der Dashboard-Zuweisung entfernt
+        await db.ref(`dashboardAssignments/A${id}`).set("");
         await ref.set(newVal);
+        
+        // CSV Log (simuliert)
+        console.log(`Log: A-${id} Paket bestätigt durch ${currentUser.email}`);
     }
 
     async function autoReset(id, tot) {
-        if(!confirm(`Austausch für A-${id} bestätigen?`)) return;
+        const check = confirm(`Wurde der Austausch für A-${id} durchgeführt? Der Zähler wird auf 0 gesetzt.`);
+        if(!check) return;
         await db.ref(`maintenanceState/agieOffsets/${id}`).set(tot);
         await db.ref(`maintenanceState/extraCycles/${id}`).set(0);
         await db.ref(`dashboardAssignments/A${id}`).set("");
     }
 
+    // --- 7. DIAGRAMM ---
     function renderChart(data) {
         const ctx = document.getElementById('mainChart').getContext('2d');
         if(chart) chart.destroy();
@@ -170,19 +187,21 @@
                     legend: { display: false },
                     tooltip: {
                         callbacks: {
-                            label: function(context) {
-                                const d = data[context.dataIndex];
+                            label: function(ctx) {
+                                const d = data[ctx.dataIndex];
                                 return [
                                     `Rest: ${d.rest.toLocaleString()} Stk.`,
-                                    `Wartung: ${d.pkg}`,
-                                    `Dauer: ${d.duration} Minuten`,
-                                    `Gesamtstand: ${d.tot.toLocaleString()}`
+                                    `Aktuelles Paket: ${d.pkgLabel}`,
+                                    `Dauer: ${d.duration} Min.`,
+                                    `Gesamtstand: ${d.tot.toLocaleString()}`,
+                                    `Seit Austausch: ${d.ist.toLocaleString()}`
                                 ];
                             }
                         }
                     },
-                    datalabels: { anchor: 'end', align: 'top', rotation: -90, font: { weight: 'bold' } }
-                }
+                    datalabels: { anchor: 'end', align: 'top', rotation: -90, font: { weight: 'bold' }, formatter: Math.round }
+                },
+                scales: { y: { beginAtZero: false } }
             },
             plugins: [ChartDataLabels]
         });

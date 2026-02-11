@@ -47,6 +47,21 @@
         .nav-btn { padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; color: var(--bosch-blue); border-radius: 4px; }
         .primary-btn { background: var(--bosch-blue); color: white; border: none; width: 100%; padding: 12px; cursor: pointer; font-weight: bold; border-radius: 4px; }
         .link-btn { background: none; border: none; color: var(--bosch-blue); text-decoration: underline; cursor: pointer; margin-top: 15px; display: block; width: 100%; text-align: center; }
+
+        /* Styling für die Einsteller-Liste */
+        #adminEinstellerList li {
+            padding: 6px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.95em;
+        }
+        #adminEinstellerList li:last-child {
+            border-bottom: none;
+        }
+        #adminEinstellerList li:hover {
+            background: #eef;
+        }
     </style>
 </head>
 <body onmousedown="resetInactivityTimer()" onkeydown="resetInactivityTimer()">
@@ -57,6 +72,34 @@
     <div style="display:flex; gap:10px;">
         <button id="authBtn" class="nav-btn" onclick="toggleAuthModal()">🔑 Login</button>
         <button class="nav-btn" onclick="openAdminModal()">⚙️ Einsteller</button>
+    </div>
+</div>
+
+<div id="adminModal" class="modal">
+    <div class="modal-box" style="width: 400px;">
+        <h2 style="margin-top:0;">Einsteller Verwaltung</h2>
+        
+        <div id="adminLoginView">
+            <div class="form-group">
+                <label>Admin-Passwort</label>
+                <input type="password" id="adminPWInput" placeholder="Passwort eingeben">
+            </div>
+            <button class="primary-btn" onclick="checkAdminPW()">Entsperren</button>
+        </div>
+
+        <div id="adminManagerView" style="display:none;">
+            <div style="max-height: 200px; overflow-y: auto; background: #f9f9f9; border: 1px solid #ddd; border-radius: 4px; padding: 10px; margin-bottom: 15px;">
+                <ul id="adminEinstellerList" style="list-style: none; padding: 0; margin: 0;"></ul>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <input type="text" id="newNachname" placeholder="Nachname" style="flex: 1;">
+                <input type="text" id="newVorname" placeholder="Vorname" style="flex: 1;">
+            </div>
+            <button class="primary-btn" style="background: var(--bosch-green); margin-bottom: 10px;" onclick="addEinsteller()">➕ Hinzufügen</button>
+        </div>
+
+        <button class="link-btn" style="color:gray; text-decoration:none;" onclick="closeAdminModal()">Schließen</button>
     </div>
 </div>
 
@@ -116,7 +159,80 @@
     function toggleAuthModal(){ if(auth.currentUser){auth.signOut();return;} document.getElementById('authModal').style.display='flex'; }
     function switchAuthMode(){ state.isRegMode=!state.isRegMode; document.getElementById('modalTitle').innerText=state.isRegMode?"Registrieren":"Login"; document.getElementById('mainAuthBtn').innerText=state.isRegMode?"Account erstellen":"Anmelden"; document.getElementById('inviteGroup').style.display=state.isRegMode?"block":"none"; }
     async function processAuth(){ const e=document.getElementById('authEmail').value,p=document.getElementById('authPass').value; if(state.isRegMode){ const i=document.getElementById('authInvite').value, s=await db.ref('config/inviteCode').once('value'); if(i!==s.val())return alert("Code falsch!"); auth.createUserWithEmailAndPassword(e,p).then(()=>location.reload()).catch(e=>alert(e.message)); }else{ auth.signInWithEmailAndPassword(e,p).then(()=>document.getElementById('authModal').style.display='none').catch(e=>alert(e.message)); } }
-    function openAdminModal(){ if(!auth.currentUser)return alert("Login erforderlich!"); const c=(state.config.einstellerListe||[]).join('\n'), n=prompt("Liste:",c); if(n!==null)db.ref('config/einstellerListe').set(n.split('\n').map(s=>s.trim()).filter(s=>s!=="")); }
+    // --- ADMIN / EINSTELLER LOGIK ---
+
+    function openAdminModal() {
+        document.getElementById('adminModal').style.display = 'flex';
+        // Reset View
+        document.getElementById('adminLoginView').style.display = 'block';
+        document.getElementById('adminManagerView').style.display = 'none';
+        document.getElementById('adminPWInput').value = '';
+    }
+
+    function closeAdminModal() {
+        document.getElementById('adminModal').style.display = 'none';
+    }
+
+    async function checkAdminPW() {
+        const input = document.getElementById('adminPWInput').value;
+        const snap = await db.ref('config/adminPW').once('value');
+        const realPW = snap.val();
+
+        if (input === realPW) {
+            document.getElementById('adminLoginView').style.display = 'none';
+            document.getElementById('adminManagerView').style.display = 'block';
+            renderAdminList();
+        } else {
+            alert("Falsches Passwort!");
+        }
+    }
+
+    function renderAdminList() {
+        const list = state.config.einstellerListe || [];
+        // Sortieren nach Nachname (String Vergleich)
+        list.sort((a, b) => a.localeCompare(b));
+
+        const ul = document.getElementById('adminEinstellerList');
+        ul.innerHTML = list.map(name => {
+            // Formatierung: "Dütsch Bernd" -> "Dütsch Be."
+            const parts = name.split(' ');
+            let display = name;
+            if (parts.length >= 2) {
+                const nachname = parts[0];
+                const vorname = parts.slice(1).join(' '); // Falls Vorname aus mehreren Teilen besteht
+                display = `<b>${nachname}</b> ${vorname.substring(0, 2)}.`;
+            }
+            return `<li>${display}</li>`;
+        }).join('');
+    }
+
+    async function addEinsteller() {
+        const n = document.getElementById('newNachname').value.trim();
+        const v = document.getElementById('newVorname').value.trim();
+
+        if (!n || !v) return alert("Bitte Vor- und Nachnamen eingeben.");
+
+        // Speichern als "Nachname Vorname"
+        const fullName = `${n} ${v}`;
+        const currentList = state.config.einstellerListe || [];
+
+        // Duplikat Check
+        if (currentList.includes(fullName)) {
+            return alert("Dieser Mitarbeiter existiert bereits!");
+        }
+
+        const newList = [...currentList, fullName];
+        
+        try {
+            await db.ref('config/einstellerListe').set(newList);
+            // Felder leeren und Liste neu rendern
+            document.getElementById('newNachname').value = '';
+            document.getElementById('newVorname').value = '';
+            renderAdminList(); // UI Update sofort (Firebase Listener macht es im Hintergrund auch)
+        } catch (e) {
+            alert("Fehler beim Speichern: " + e.message);
+        }
+    }
 
     // --- DATA ---
     db.ref('maintenanceConfig').on('value', s => { state.maintConfig = s.val() || {}; updateUI(); });

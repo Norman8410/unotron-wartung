@@ -174,8 +174,8 @@
     }
 
     async function checkAdminPW() {
-        const input = document.getElementById('adminPWInput').value;
-        const snap = await db.ref('config/adminPW').once('value');
+        const input = document.getElementById('AdminPWInput').value;
+        const snap = await db.ref('config/AdminPW').once('value');
         const realPW = snap.val();
 
         if (input === realPW) {

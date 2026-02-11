@@ -2,209 +2,192 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Agie Wartung - Master System</title>
+    <title>Zentrales Wartungs Dashboard W430</title>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <style>
         :root { 
-            --bosch-red: #d50000; --bosch-blue: #003a6c; --bosch-green: #008a4f; 
-            --bosch-gray: #eff1f2; --bosch-dark-red: #8b0000;
+            --bosch-red: #d50000; --bosch-blue: #003a6c; --bosch-light-blue: #00b5e2; 
+            --bosch-green: #008a4f; --bosch-gray: #eff1f2; --bosch-dark-red: #8b0000;
+            --bosch-work-yellow: #fff3cd; 
         }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bosch-gray); margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .top-bar { height: 45px; background: linear-gradient(90deg, #d50000 0%, #003a6c 50%, #008a4f 100%); display: flex; align-items: center; padding: 0 15px; color: white; font-weight: bold; }
-        .header { background: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .main-layout { display: flex; flex: 1; padding: 20px; gap: 20px; overflow: hidden; }
-        .chart-area { flex: 3; background: white; padding: 20px; border-top: 4px solid var(--bosch-blue); border-radius: 4px; position: relative; }
-        .sidebar { flex: 1.5; background: white; border-top: 4px solid var(--bosch-blue); overflow-y: auto; padding: 10px; border-radius: 4px; }
-        .row { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; gap: 10px; border-left: 8px solid #ccc; margin-bottom: 5px; transition: 0.2s; }
-        .row:hover { background: #f9f9f9; }
-        .btn-cycle { padding: 8px 12px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; border-radius: 2px; }
-        .btn-reset-auto { background: var(--bosch-red); color: white; border: none; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 2px; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bosch-gray); margin: 0; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        .top-bar { height: 45px; width: 100%; background: linear-gradient(90deg, #d50000 0%, #003a6c 50%, #008a4f 100%); display: flex; align-items: center; padding: 0 15px; color: white; font-weight: bold; box-sizing: border-box; }
+        .header { background: white; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; padding: 20px; flex: 1; overflow: hidden; }
+        .column { background: white; border-top: 5px solid var(--bosch-blue); display: flex; flex-direction: column; overflow: hidden; border-radius: 4px; }
+        .col-header { padding: 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; font-weight: bold; font-size: 1.2em; display: flex; justify-content: space-between; align-items: center; }
+        .col-header a { text-decoration: none; color: inherit; cursor: pointer; }
+        .machine-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .card { padding: 12px; border-bottom: 1px solid #eee; border-left: 8px solid #ccc; margin-bottom: 8px; background: #fff; position: relative; }
+        .card.warning { border-left-color: #ffa500; }
+        .card.critical { border-left-color: var(--bosch-red); }
+        .card.overdue { border-left-color: var(--bosch-dark-red); }
+        .card.in-progress { background: var(--bosch-work-yellow) !important; border-left-style: dashed; }
         @keyframes blink-red { 0% { background: #fff; } 50% { background: #ffcccc; } 100% { background: #fff; } }
         .blink { animation: blink-red 1s infinite; }
+        .card-info { display: flex; justify-content: space-between; align-items: flex-start; }
+        .m-id { font-weight: bold; font-size: 1.1em; }
+        .m-rest { font-weight: bold; font-size: 1.1em; }
+        .m-paket { font-size: 0.85em; color: var(--bosch-red); font-weight: bold; margin-top: 2px; }
+        select { width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 2px; margin-top: 8px; }
+        .nav-btn { padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; color: var(--bosch-blue); border-radius: 2px; }
+        .btn-primary { background: var(--bosch-blue); color: white; border: none; }
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 4000; }
+        .modal-box { background: white; padding: 30px; border-top: 8px solid var(--bosch-red); width: 450px; border-radius: 4px; }
+        #timeout-bar-container { position: absolute; bottom: 0; left: 0; width: 100%; height: 4px; background: #ddd; }
+        #timeout-bar { height: 100%; width: 0%; background: var(--bosch-red); }
     </style>
 </head>
-<body onmousemove="resetTimer()">
+<body onmousedown="resetInactivityTimer()" onkeydown="resetInactivityTimer()">
 
-<div class="top-bar">Agie Wartungsübersicht (Dynamisch)</div>
+<div class="top-bar">Zentrales Wartungs Dashboard W430</div>
 <div class="header">
-    <div><span style="font-size: 24px; color: var(--bosch-red); font-weight: 900;">BOSCH</span></div>
-    <button style="padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; color: var(--bosch-blue);" onclick="window.close()">❌ Schließen</button>
+    <div><span style="color:var(--bosch-red);font-weight:900;font-size:24px;">BOSCH</span> <span style="font-weight:bold;margin-left:10px;color:#555;">Statusübersicht</span></div>
+    <div style="display:flex; gap:10px;">
+        <button class="nav-btn" onclick="document.getElementById('helpModal').style.display='flex'">ℹ️ Hilfe</button>
+        <button id="authBtn" class="nav-btn" onclick="handleLoginClick()">🔑 Login</button>
+        <button class="nav-btn" onclick="openAdminModal()">⚙️ Einsteller</button>
+    </div>
 </div>
 
-<div class="main-layout">
-    <div class="chart-area"><canvas id="mainChart"></canvas></div>
-    <div class="sidebar" id="machineList">Lade Daten...</div>
+<div class="dashboard-grid">
+    <div class="column"><div class="col-header"><a onclick="window.open('https://norman8410.github.io/Wartungs-Dashboard-W430V3/agie.html','_blank')">⚡ Agie ➔</a> <span id="count-agie">0</span></div><div class="machine-list" id="list-agie"></div></div>
+    <div class="column" style="border-top-color: var(--bosch-green);"><div class="col-header"><a onclick="window.open('https://norman8410.github.io/Wartungs-Dashboard-W430V3/unotron.html','_blank')">🧪 Unotron ➔</a> <span id="count-uno">0</span></div><div class="machine-list" id="list-uno"></div></div>
+    <div class="column" style="border-top-color: var(--bosch-light-blue);"><div class="col-header"><a onclick="window.open('https://norman8410.github.io/Wartungs-Dashboard-W430V3/he.html','_blank')">⚙️ HE ➔</a> <span id="count-he">0</span></div><div class="machine-list" id="list-he"></div></div>
 </div>
+
+<div id="timeout-bar-container"><div id="timeout-bar"></div></div>
+
+<div id="loginModal" class="modal"><div class="modal-box" style="text-align: center;">
+    <h3 id="modalTitle">Login</h3>
+    <input type="email" id="mEmail" placeholder="E-Mail" style="width:100%; padding:10px; margin-bottom:5px;">
+    <input type="password" id="mPass" placeholder="Passwort" style="width:100%; padding:10px; margin-bottom:10px;">
+    <div id="regExtra" style="display:none;"><input type="text" id="mInvite" placeholder="Einladungscode" style="width:100%; padding:10px; margin-bottom:5px;">
+    <p style="font-size:11px;color:#666;">Den Einladungscode erhalten Sie von Ihrem TL, FK oder Admin.</p></div>
+    <button class="nav-btn btn-primary" style="width:100%;margin-top:10px;" onclick="handleAuthAction()">Bestätigen</button>
+    <p id="toggleT" style="cursor:pointer;color:var(--bosch-blue);font-size:12px;margin-top:10px;" onclick="toggleM()">Konto erstellen?</p>
+    <button class="nav-btn" style="width:100%;margin-top:5px;" onclick="closeModals()">Abbrechen</button>
+</div></div>
+
+<div id="adminModal" class="modal"><div class="modal-box">
+    <h3>Einsteller-Liste bearbeiten</h3>
+    <textarea id="einstellerTextarea" rows="6" style="width:100%; box-sizing:border-box; padding:10px;"></textarea>
+    <button class="nav-btn btn-primary" style="width:100%; margin-top:10px;" onclick="saveEinstellerList()">Liste speichern</button>
+    <button class="nav-btn" style="width:100%; margin-top:5px;" onclick="closeModals()">Abbrechen</button>
+</div></div>
+
+<div id="helpModal" class="modal"><div class="modal-box">
+    <h2 style="color:var(--bosch-blue); border-bottom: 2px solid var(--bosch-red); padding-bottom: 10px;">System-Hilfe</h2>
+    <p><strong>Auto-Logout:</strong> Erfolgt nach 70s Inaktivität.</p>
+    <p>Den Einladungscode erhalten Sie von Ihrem TL, FK oder Admin.</p>
+    <p><strong>Verantwortlich: Norman Schultheis</strong></p>
+    <button class="nav-btn btn-primary" style="width:100%; margin-top:20px;" onclick="closeModals()">Schließen</button>
+</div></div>
 
 <script>
-    // --- 1. ZEIT-TABELLE (Werte aus deiner CSV) ---
-    const TIMES = { "P1": 60, "P2": 75, "P3": 10, "P4": 220, "P5": 200, "P6": 40, "P7": 345 };
-    
-    // --- 2. WARTUNGSINTERVALLE (16.000er Schritte) ---
-    const AGIE_STEPS = [
-        {target: 16000, pkg: "P1/2"}, {target: 32000, pkg: "P1/3"}, {target: 48000, pkg: "P1/2"},
-        {target: 64000, pkg: "P1/4"}, {target: 80000, pkg: "P1/2/3"}, {target: 96000, pkg: "P1/5"},
-        {target: 112000, pkg: "P1/2"}, {target: 128000, pkg: "P1/3"}, {target: 144000, pkg: "P1/2"},
-        {target: 160000, pkg: "P1/4"}, {target: 176000, pkg: "P1/2/3"}, {target: 192000, pkg: "P1/6/7"},
-        {target: 208000, pkg: "P1/2"}
-    ];
-    const MAX_LIMIT = 220000;
-
-    // --- 3. FIREBASE SETUP ---
-    const firebaseConfig = { 
-        apiKey: "AIzaSyD6xGCtU-felOyO_BRsFnVlB4yhC46FgYg", 
-        authDomain: "bosch-agie-wartung.firebaseapp.com", 
-        databaseURL: "https://bosch-agie-wartung-default-rtdb.europe-west1.firebasedatabase.app", 
-        projectId: "bosch-agie-wartung" 
-    };
+    const firebaseConfig = { apiKey: "AIzaSyD6xGCtU-felOyO_BRsFnVlB4yhC46FgYg", authDomain: "bosch-agie-wartung.firebaseapp.com", databaseURL: "https://bosch-agie-wartung-default-rtdb.europe-west1.firebasedatabase.app", projectId: "bosch-agie-wartung" };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database(), auth = firebase.auth();
-    
-    let chart = null, currentUser = null, inactivityTimer;
 
-    function resetTimer() {
+    // Master-Paketlisten
+    const PKGS = {
+        'A': ["P1/2", "P1/3", "P1/2", "P1/4", "P1/2/3", "P1/5", "P1/2", "P1/3", "P1/2", "P1/4", "P1/2/3", "P1/6/7", "P1/2"],
+        'H': ["P 6/7/9/12", "P 1/2/3/4/5/6/7/8/10/11/12", "P 6/7/9/12/13", "P 1/3/4/5/6/7/8/10/11/12"]
+    };
+    const UNO_STEPS = [{total:2000, pkg:"P1, P2"}, {total:4000, pkg:"P3"}, {total:10000, pkg:"P1"}, {total:14000, pkg:"P5"}, {total:18000, pkg:"P1, P2"}, {total:26000, pkg:"P1"}, {total:28000, pkg:"P6, P7"}, {total:30000, pkg:"P3"}, {total:34000, pkg:"P1, P2"}, {total:42000, pkg:"P1"}, {total:50000, pkg:"P1, P2"}, {total:56000, pkg:"P3"}, {total:58000, pkg:"P1"}, {total:66000, pkg:"P1, P2"}, {total:74000, pkg:"P1"}, {total:82000, pkg:"P1, P2"}, {total:90000, pkg:"P3"}, {total:98000, pkg:"P1"}, {total:104000, pkg:"WP RESET"}];
+
+    let state = { config:{}, assignments:{}, agie:{}, uno:{}, he:{} };
+    let inactivityTimer, startTime, isReg = false;
+
+    // Timer & Auth wie gehabt...
+    window.resetInactivityTimer = function() {
         clearTimeout(inactivityTimer);
-        inactivityTimer = setTimeout(() => { window.close(); }, 70000);
+        if (auth.currentUser) {
+            startTime = Date.now();
+            inactivityTimer = setTimeout(() => { auth.signOut(); }, 70000);
+            updateBar();
+        }
     }
+    function updateBar() { if (!auth.currentUser) return; const pct = Math.min(100, ((Date.now() - startTime) / 70000) * 100); document.getElementById('timeout-bar').style.width = pct + "%"; if (pct < 100) requestAnimationFrame(updateBar); }
 
-    // Hilfsfunktion zur Zeitberechnung (P1/2 -> 60+75=135)
-    function getDuration(pkgString) {
-        if (!pkgString || pkgString.includes("RESET")) return 0;
-        const parts = pkgString.split('/');
-        let total = 0;
-        parts.forEach((p, idx) => {
-            const key = idx === 0 ? p : "P" + p;
-            total += (TIMES[key] || 0);
-        });
-        return total;
-    }
+    db.ref('config').on('value', s => { state.config = s.val() || {}; updateUI(); });
+    db.ref('dashboardAssignments').on('value', s => { state.assignments = s.val() || {}; updateUI(); });
+    db.ref('maintenanceState').on('value', s => { state.agie = s.val() || {}; updateUI(); });
+    db.ref('maintenanceStateUnotron').on('value', s => { state.uno = s.val() || {}; updateUI(); });
+    db.ref('maintenanceStateHE').on('value', s => { state.he = s.val() || {}; updateUI(); });
 
-    auth.onAuthStateChanged(user => { currentUser = user; });
-
-    // --- 4. DATENVERARBEITUNG ---
-    db.ref('maintenanceState').on('value', snap => {
-        const val = snap.val() || {};
-        const raw = val.cloudRawData || [];
-        const offsets = val.agieOffsets || {};
-        const cycles = val.extraCycles || {};
-        
-        const data = raw.map(item => {
-            const id = item.StationNo || item.STATIONNO;
-            if(!id) return null;
-            
-            const tot = parseInt(item.Parts) || 0;
-            const off = offsets[id] || 0;
-            const ist = tot - off; // Die tatsächlich gelaufenen Teile seit letztem Austausch
-            const cyc = cycles[id] || 0; // Der aktuelle Klick-Stand
-            
-            const step = AGIE_STEPS[cyc] || { target: MAX_LIMIT, pkg: "AUSTAUSCH" };
-            const isOverMax = ist >= MAX_LIMIT;
-            
-            const duration = getDuration(step.pkg);
-            const targetVal = isOverMax ? MAX_LIMIT : step.target;
-            const rest = targetVal - ist;
-
-            return { 
-                id, rest, ist, tot, cyc, 
-                pkgLabel: isOverMax ? "AUSTAUSCH ERFORDERLICH" : "Offen: " + step.pkg,
-                duration, 
-                needsReset: isOverMax, 
-                color: getC(rest, isOverMax) 
-            };
-        }).filter(d => d !== null).sort((a,b) => a.rest - b.rest);
-
-        renderList(data);
-        renderChart(data);
+    auth.onAuthStateChanged(user => {
+        document.getElementById('authBtn').innerText = user ? "🔓 Logout" : "🔑 Login";
+        if(user) resetInactivityTimer(); else { clearTimeout(inactivityTimer); document.getElementById('timeout-bar').style.width = "0%"; }
+        updateUI();
     });
 
-    function getC(r, reset) {
-        if(reset || r <= 0) return "#8b0000";
-        if(r <= 500) return "#d50000";
-        if(r <= 2000) return "#ffa500";
-        return "#008a4f";
+    function handleLoginClick() { if(auth.currentUser) auth.signOut(); else document.getElementById('loginModal').style.display='flex'; }
+    function closeModals() { document.querySelectorAll('.modal').forEach(m => m.style.display='none'); }
+    function toggleM() { isReg=!isReg; document.getElementById('regExtra').style.display=isReg?'block':'none'; }
+    async function handleAuthAction() {
+        const e = document.getElementById('mEmail').value, p = document.getElementById('mPass').value;
+        try { if(isReg) { if(document.getElementById('mInvite').value !== "bosch2026") return alert("Code falsch!"); await auth.createUserWithEmailAndPassword(e, p); } else await auth.signInWithEmailAndPassword(e, p); closeModals(); } catch(err) { alert(err.message); }
+    }
+    function openAdminModal() { if(prompt("Admin PW:") === state.config.AdminPW) document.getElementById('adminModal').style.display='flex'; }
+    async function saveEinstellerList() {
+        const list = document.getElementById('einstellerTextarea').value.split(',').map(s=>s.trim()).filter(s=>s!=="");
+        await db.ref('config/einstellerListe').set(list); closeModals();
+    }
+    async function safeSave(key, val) {
+        if(!auth.currentUser) return alert("Bitte einloggen!");
+        await db.ref(`dashboardAssignments/${key}`).set(val); resetInactivityTimer();
     }
 
-    // --- 5. UI RENDERING ---
-    function renderList(data) {
-        document.getElementById('machineList').innerHTML = data.map(d => `
-            <div class="row ${d.rest <= 0 ? 'blink' : ''}" style="border-left-color:${d.color}">
-                <div style="flex:2">
-                    <b>A-${d.id}</b><br>
-                    <small style="color:var(--bosch-red); font-weight:bold">
-                        ${d.pkgLabel} ${d.duration > 0 ? '(' + d.duration + ' Min.)' : ''}
-                    </small>
-                </div>
-                <div style="flex:1; text-align:right; font-size: 14px;">Rest:<br><b>${d.rest.toLocaleString()}</b></div>
-                <div style="display:${currentUser ? 'flex' : 'none'}; gap:5px; margin-left:10px;">
-                    ${d.needsReset ? 
-                        `<button class="btn-reset-auto" onclick="autoReset('${d.id}', ${d.tot})">AUSTAUSCH</button>` :
-                        `<button class="btn-cycle" onclick="changeC('${d.id}', 1)">+</button>`
-                    }
-                </div>
-            </div>`).join('');
+    function updateUI() {
+        renderCol('list-agie', 'count-agie', state.agie, 'A', 16000, 220000, 2000, 500);
+        renderCol('list-uno', 'count-uno', state.uno, 'U', 0, 104000, 250, 60);
+        renderCol('list-he', 'count-he', state.he, 'H', 156000, 624000, 19500, 4800);
     }
 
-    // --- 6. AKTIONEN ---
-    async function changeC(id, v) {
-        if(!currentUser) return;
-        const ref = db.ref(`maintenanceState/extraCycles/${id}`);
-        const snap = await ref.once('value');
-        const newVal = (snap.val() || 0) + v;
+    function renderCol(id, cId, raw, pre, interval, max, warn, crit) {
+        if(!raw || !raw.cloudRawData) return;
         
-        // Logik: Bei Klick wird die Maschine aus der Dashboard-Zuweisung entfernt
-        await db.ref(`dashboardAssignments/A${id}`).set("");
-        await ref.set(newVal);
-        
-        // CSV Log (simuliert)
-        console.log(`Log: A-${id} Paket bestätigt durch ${currentUser.email}`);
-    }
+        const data = raw.cloudRawData.map(item => {
+            const sId = item.StationNo || item.STATIONNO;
+            if(!sId) return null;
+            const cIdx = (raw.extraCycles && raw.extraCycles[sId]) || 0;
+            let ist, target, pkg;
 
-    async function autoReset(id, tot) {
-        const check = confirm(`Wurde der Austausch für A-${id} durchgeführt? Der Zähler wird auf 0 gesetzt.`);
-        if(!check) return;
-        await db.ref(`maintenanceState/agieOffsets/${id}`).set(tot);
-        await db.ref(`maintenanceState/extraCycles/${id}`).set(0);
-        await db.ref(`dashboardAssignments/A${id}`).set("");
-    }
+            if(pre==='U') {
+                ist = parseInt(item["COUNT(*)"]||0);
+                const tObj = UNO_STEPS[cIdx] || { total: 104000+((cIdx-18)*5000), pkg: "Folge" };
+                target = tObj.total; pkg = "Wartung " + tObj.pkg;
+            } else {
+                const off = (pre==='A' ? (raw.agieOffsets && raw.agieOffsets[sId]) : (raw.heOffsets && raw.heOffsets[sId])) || 0;
+                ist = (parseInt(item.Parts)||0) - off;
+                target = interval + (cIdx * interval);
+                let pkgName = PKGS[pre][cIdx % PKGS[pre].length];
+                if (target > max) { pkgName = "WP RESET"; target = max; }
+                pkg = "Wartung " + pkgName;
+            }
+            return { id:pre+"-"+sId, rest: target-ist, key:pre+sId, pkg, warn, crit };
+        }).filter(m => m && m.rest < m.warn).sort((a,b) => a.rest - b.rest);
 
-    // --- 7. DIAGRAMM ---
-    function renderChart(data) {
-        const ctx = document.getElementById('mainChart').getContext('2d');
-        if(chart) chart.destroy();
-        chart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: data.map(d => "A-" + d.id),
-                datasets: [{ data: data.map(d => d.rest), backgroundColor: data.map(d => d.color) }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: function(ctx) {
-                                const d = data[ctx.dataIndex];
-                                return [
-                                    `Rest: ${d.rest.toLocaleString()} Stk.`,
-                                    `Aktuelles Paket: ${d.pkgLabel}`,
-                                    `Dauer: ${d.duration} Min.`,
-                                    `Gesamtstand: ${d.tot.toLocaleString()}`,
-                                    `Seit Austausch: ${d.ist.toLocaleString()}`
-                                ];
-                            }
-                        }
-                    },
-                    datalabels: { anchor: 'end', align: 'top', rotation: -90, font: { weight: 'bold' }, formatter: Math.round }
-                },
-                scales: { y: { beginAtZero: false } }
-            },
-            plugins: [ChartDataLabels]
-        });
+        document.getElementById(cId).innerText = data.length;
+        document.getElementById(id).innerHTML = data.map(m => {
+            const assigned = state.assignments[m.key] || "";
+            const isWorking = assigned !== "";
+            const status = (m.rest <= 0 && !isWorking) ? 'blink overdue' : (m.rest <= 0 ? 'overdue' : (m.rest < m.crit ? 'critical' : 'warning'));
+            return `
+            <div class="card ${status} ${isWorking?'in-progress':''}">
+                <div class="card-info">
+                    <div><div class="m-id">${m.id}</div><div class="m-paket">${m.pkg}</div></div>
+                    <div class="m-rest">${m.rest.toLocaleString()}</div>
+                </div>
+                <select ${!auth.currentUser?'disabled':''} onchange="safeSave('${m.key}', this.value)">
+                    <option value="">-- Einsteller wählen --</option>
+                    ${(state.config.einstellerListe||[]).map(e => `<option value="${e}" ${assigned===e?'selected':''}>${e}</option>`).join('')}
+                </select>
+            </div>`;
+        }).join('');
     }
 </script>
 </body>

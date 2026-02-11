@@ -118,7 +118,27 @@
     </div>
 </div>
 
-<div id="authModal" class="modal"><div class="modal-box"><h2 id="modalTitle" style="margin-top:0;">Login</h2><div class="form-group"><input type="email" id="authEmail" placeholder="E-Mail"></div><div class="form-group"><input type="password" id="authPass" placeholder="Passwort"></div><div class="form-group" id="inviteGroup" style="display:none;"><input type="text" id="authInvite" placeholder="Einladungscode"></div><button class="primary-btn" id="mainAuthBtn" onclick="processAuth()">Anmelden</button><button class="link-btn" id="switchBtn" onclick="switchAuthMode()">Neu hier? Registrieren</button><button class="link-btn" style="color:gray; text-decoration:none;" onclick="toggleAuthModal()">Abbrechen</button></div></div>
+<div id="authModal" class="modal">
+    <div class="modal-box">
+        <h2 id="modalTitle" style="margin-top:0;">Login</h2>
+        <div class="form-group">
+            <input type="text" id="authIdentifier" placeholder="Benutzername oder E-Mail">
+        </div>
+        <div class="form-group" id="userGroup" style="display:none;">
+            <input type="text" id="authUsername" placeholder="Wunsch-Benutzername">
+        </div>
+        <div class="form-group" id="emailGroup" style="display:none;">
+            <input type="email" id="authEmail" placeholder="E-Mail">
+        </div>
+        
+        <div class="form-group"><input type="password" id="authPass" placeholder="Passwort"></div>
+        <div class="form-group" id="inviteGroup" style="display:none;"><input type="text" id="authInvite" placeholder="Einladungscode"></div>
+        
+        <button class="primary-btn" id="mainAuthBtn" onclick="processAuth()">Anmelden</button>
+        <button class="link-btn" id="switchBtn" onclick="switchAuthMode()">Neu hier? Registrieren</button>
+        <button class="link-btn" style="color:gray; text-decoration:none;" onclick="toggleAuthModal()">Abbrechen</button>
+    </div>
+</div>
 
 <script>
     const firebaseConfig = { apiKey: "AIzaSyD6xGCtU-felOyO_BRsFnVlB4yhC46FgYg", authDomain: "bosch-agie-wartung.firebaseapp.com", databaseURL: "https://bosch-agie-wartung-default-rtdb.europe-west1.firebasedatabase.app", projectId: "bosch-agie-wartung" };
@@ -156,9 +176,77 @@
     function formatTotalTime(m) { if(m<=0)return""; if(m<60)return m+" Min."; const h=Math.floor(m/60); if(h<24)return(m%60)>0?`${h}h ${m%60}m`:`${h}h`; return Math.floor(h/24)+"T "+(h%24)+"h"; }
     function getDuration(p, t) { if(!p||p.includes("RESET")||!t)return 0; return p.split('/').reduce((a,c)=>{let k=c.toUpperCase().trim(); if(!k.startsWith("P"))k="P"+k; return a+(t[k]||0);},0); }
     function resetInactivityTimer() { clearTimeout(inactivityTimer); if(auth.currentUser) inactivityTimer=setTimeout(()=>auth.signOut(),180000); }
-    function toggleAuthModal(){ if(auth.currentUser){auth.signOut();return;} document.getElementById('authModal').style.display='flex'; }
-    function switchAuthMode(){ state.isRegMode=!state.isRegMode; document.getElementById('modalTitle').innerText=state.isRegMode?"Registrieren":"Login"; document.getElementById('mainAuthBtn').innerText=state.isRegMode?"Account erstellen":"Anmelden"; document.getElementById('inviteGroup').style.display=state.isRegMode?"block":"none"; }
-    async function processAuth(){ const e=document.getElementById('authEmail').value,p=document.getElementById('authPass').value; if(state.isRegMode){ const i=document.getElementById('authInvite').value, s=await db.ref('config/inviteCode').once('value'); if(i!==s.val())return alert("Code falsch!"); auth.createUserWithEmailAndPassword(e,p).then(()=>location.reload()).catch(e=>alert(e.message)); }else{ auth.signInWithEmailAndPassword(e,p).then(()=>document.getElementById('authModal').style.display='none').catch(e=>alert(e.message)); } }
+// --- AUTH LOGIK NEU ---
+
+function toggleAuthModal() {
+    if (auth.currentUser) {
+        auth.signOut();
+        return;
+    }
+    // Alle Felder leeren beim Öffnen (Punkt 1 deiner Liste)
+    document.getElementById('authIdentifier').value = '';
+    document.getElementById('authUsername').value = '';
+    document.getElementById('authEmail').value = '';
+    document.getElementById('authPass').value = '';
+    document.getElementById('authInvite').value = '';
+    
+    document.getElementById('authModal').style.display = 'flex';
+}
+
+function switchAuthMode() {
+    state.isRegMode = !state.isRegMode;
+    document.getElementById('modalTitle').innerText = state.isRegMode ? "Registrieren" : "Login";
+    document.getElementById('mainAuthBtn').innerText = state.isRegMode ? "Account erstellen" : "Anmelden";
+    
+    // Sichtbarkeit der Felder steuern
+    document.getElementById('userGroup').style.display = state.isRegMode ? "block" : "none";
+    document.getElementById('emailGroup').style.display = state.isRegMode ? "block" : "none";
+    document.getElementById('inviteGroup').style.display = state.isRegMode ? "block" : "none";
+    document.getElementById('authIdentifier').parentElement.style.display = state.isRegMode ? "none" : "block";
+}
+
+async function processAuth() {
+    const identifier = document.getElementById('authIdentifier').value.trim(); // Login-Feld
+    const pass = document.getElementById('authPass').value;
+    
+    if (state.isRegMode) {
+        // --- REGISTRIERUNG ---
+        const username = document.getElementById('authUsername').value.trim().toLowerCase();
+        const email = document.getElementById('authEmail').value.trim();
+        const invite = document.getElementById('authInvite').value;
+        const s = await db.ref('config/inviteCode').once('value');
+
+        if (!username || !email || !pass) return alert("Alle Felder ausfüllen!");
+        if (invite !== s.val()) return alert("Einladungscode falsch!");
+
+        // Prüfen ob Benutzername schon vergeben
+        const userCheck = await db.ref(`usernames/${username}`).once('value');
+        if (userCheck.exists()) return alert("Benutzername bereits vergeben!");
+
+        try {
+            const userCredential = await auth.createUserWithEmailAndPassword(email, pass);
+            // In DB speichern: Benutzername -> E-Mail Mapping
+            await db.ref(`usernames/${username}`).set(email);
+            location.reload();
+        } catch (e) { alert(e.message); }
+
+    } else {
+        // --- LOGIN ---
+        let emailToLogin = identifier;
+
+        // Wenn kein '@' im Feld ist, gehen wir von einem Benutzernamen aus
+        if (!identifier.includes('@')) {
+            const userSnap = await db.ref(`usernames/${identifier.toLowerCase()}`).once('value');
+            if (!userSnap.exists()) return alert("Benutzername nicht gefunden!");
+            emailToLogin = userSnap.val();
+        }
+
+        try {
+            await auth.signInWithEmailAndPassword(emailToLogin, pass);
+            document.getElementById('authModal').style.display = 'none';
+        } catch (e) { alert("Login fehlgeschlagen: " + e.message); }
+    }
+}
 // --- ADMIN / EINSTELLER LOGIK ---
 
 function openAdminModal() {

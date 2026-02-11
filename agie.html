@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Agie Wartung - Master</title>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <style>
+        :root { 
+            --bosch-red: #d50000; --bosch-blue: #003a6c; --bosch-green: #008a4f; 
+            --bosch-gray: #eff1f2; --bosch-dark-red: #8b0000;
+        }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bosch-gray); margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .top-bar { height: 45px; background: linear-gradient(90deg, #d50000 0%, #003a6c 50%, #008a4f 100%); display: flex; align-items: center; padding: 0 15px; color: white; font-weight: bold; }
+        .header { background: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .main-layout { display: flex; flex: 1; padding: 20px; gap: 20px; overflow: hidden; }
+        .chart-area { flex: 3; background: white; padding: 20px; border-top: 4px solid var(--bosch-blue); border-radius: 4px; position: relative; }
+        .sidebar { flex: 1.5; background: white; border-top: 4px solid var(--bosch-blue); overflow-y: auto; padding: 10px; border-radius: 4px; }
+        .row { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; gap: 10px; border-left: 8px solid #ccc; margin-bottom: 5px; }
+        
+        .btn-cycle { padding: 8px 12px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; border-radius: 2px; }
+        .btn-cycle:hover { background: #f0f0f0; }
+        .btn-reset-auto { background: var(--bosch-red); color: white; border: none; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 5px; }
+        
+        @keyframes blink-red { 0% { background: #fff; } 50% { background: #ffcccc; } 100% { background: #fff; } }
+        .blink { animation: blink-red 1s infinite; }
+    </style>
+</head>
+<body onmousemove="resetTimer()">
+
+<div class="top-bar">Agie Wartungsübersicht (System Master)</div>
+<div class="header">
+    <div><span style="font-size: 24px; color: var(--bosch-red); font-weight: 900;">BOSCH</span></div>
+    <button style="padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; color: var(--bosch-blue);" onclick="window.close()">❌ Schließen</button>
+</div>
+
+<div class="main-layout">
+    <div class="chart-area"><canvas id="mainChart"></canvas></div>
+    <div class="sidebar" id="machineList">Lade Daten...</div>
+</div>
+
+<script>
+    let chart = null, currentUser = null, inactivityTimer;
+    let agieConfig = null; // <-- Neu
+
+    const firebaseConfig = { apiKey: "AIzaSyD6xGCtU-felOyO_BRsFnVlB4yhC46FgYg", authDomain: "bosch-agie-wartung.firebaseapp.com", databaseURL: "https://bosch-agie-wartung-default-rtdb.europe-west1.firebasedatabase.app", projectId: "bosch-agie-wartung" };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database(), auth = firebase.auth();
+    
+    let chart = null, currentUser = null, inactivityTimer;
+
+    function resetTimer() {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => { window.close(); }, 70000);
+    }
+
+    auth.onAuthStateChanged(user => { currentUser = user; });
+
+    // Zuerst die Konfiguration laden
+    db.ref('maintenanceConfig/agie').on('value', configSnap => {
+        agieConfig = configSnap.val();
+        if (!agieConfig) {
+            console.error("Agie Konfiguration konnte nicht geladen werden!");
+            // Optional: Fallback-Werte setzen oder Fehler anzeigen
+            return;
+        }
+        
+        // Erst wenn die Konfiguration geladen ist, die Maschinendaten laden
+        db.ref('maintenanceState').on('value', snap => {
+            const val = snap.val() || {}, raw = val.cloudRawData || [], offsets = val.agieOffsets || {}, cycles = val.extraCycles || {};
+            
+            // ... (der Rest des Codes bleibt hier gleich, wird aber gleich angepasst)
+            
+            const data = raw.map(item => {
+                const id = item.StationNo || item.STATIONNO;
+                if(!id) return null;
+                const tot = parseInt(item.Parts) || 0;
+                const off = offsets[id] || 0;
+                const ist = tot - off;
+                const cyc = cycles[id] || 0;
+                
+                // === ANPASSUNG HIER UNTEN ===
+                const needsReset = ist >= agieConfig.resetThreshold;
+                const target = needsReset ? agieConfig.resetThreshold : (agieConfig.intervalStep + (cyc * agieConfig.intervalStep));
+                const pkg = needsReset ? "AUSTAUSCH ERFORDERLICH" : "Offen: " + (agieConfig.intervals[cyc] ? agieConfig.intervals[cyc].packages.join('/') : "Folgepaket");
+                const rest = target - ist;
+    
+                return { id, rest, ist, tot, cyc, pkg, needsReset, color: getC(rest, needsReset) };
+            }).filter(d => d !== null).sort((a,b) => a.rest - b.rest);
+    
+            renderList(data);
+            renderChart(data);
+        });
+    });
+
+    function getC(r, reset) {
+        if (!agieConfig) return "#ccc"; // Fallback, falls Konfig nicht geladen
+    
+        if(reset || r <= 0) return "#8b0000"; // Überfällig / Reset
+        if(r <= agieConfig.criticalThreshold) return "#d50000"; // Kritisch
+        if(r <= agieConfig.warningThreshold) return "#ffa500"; // Warnung
+        return "#008a4f"; // Normal (grün)
+    }
+
+    function renderList(data) {
+        document.getElementById('machineList').innerHTML = data.map(d => `
+            <div class="row ${d.rest <= 0 ? 'blink' : ''}" style="border-left-color:${d.color}">
+                <div style="flex:1.5">
+                    <b>A-${d.id}</b><br>
+                    <small style="color:var(--bosch-red); font-weight:bold">${d.pkg}</small>
+                </div>
+                <div style="flex:1; text-align:right;"><b>${d.rest.toLocaleString()}</b></div>
+                <div style="display:${currentUser ? 'flex' : 'none'}; gap:5px; margin-left:10px; flex-direction:column;">
+                    ${d.needsReset ? 
+                        `<button class="btn-reset-auto" onclick="autoReset('${d.id}', ${d.tot})">Austausch bestätigen</button>` :
+                        `<div style="display:flex; gap:5px; align-items:center;">
+                            <button class="btn-cycle" onclick="changeC('${d.id}', -1)">-</button>
+                            <span style="font-weight:bold; min-width:20px; text-align:center">${d.cyc}</span>
+                            <button class="btn-cycle" onclick="changeC('${d.id}', 1)">+</button>
+                         </div>`
+                    }
+                </div>
+            </div>`).join('');
+    }
+
+    async function changeC(id, v) {
+        if(!currentUser) return;
+        const ref = db.ref(`maintenanceState/extraCycles/${id}`);
+        const snap = await ref.once('value');
+        const newVal = Math.max(0, (snap.val() || 0) + v);
+        
+        // Einsteller-Backup Logik
+        const refAssign = db.ref(`dashboardAssignments/A${id}`);
+        const refBackup = db.ref(`maintenanceState/lastEinsteller/A${id}`);
+        if(v > 0) {
+            const sA = await refAssign.once('value');
+            if(sA.val()) await refBackup.set(sA.val());
+            await refAssign.set("");
+        } else {
+            const sB = await refBackup.once('value');
+            if(sB.val()) await refAssign.set(sB.val());
+        }
+        await ref.set(newVal);
+    }
+
+    async function autoReset(id, tot) {
+        if(!confirm(`Hiermit wird der Austausch für A-${id} bestätigt. Der Zähler wird zurückgesetzt.`)) return;
+        await db.ref(`maintenanceState/agieOffsets/${id}`).set(tot);
+        await db.ref(`maintenanceState/extraCycles/${id}`).set(0);
+        await db.ref(`dashboardAssignments/A${id}`).set("");
+        // Log-Eintrag
+        await db.ref('auditLog').push({
+            Maschine: "A-" + id, Aktion: "KOMPLETT-AUSTAUSCH", Zeit: new Date().toLocaleString(), User: currentUser.email
+        });
+    }
+
+    function renderChart(data) {
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        if(chart) chart.destroy();
+        chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.map(d => "A-" + d.id),
+                datasets: [{ data: data.map(d => d.rest), backgroundColor: data.map(d => d.color) }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const d = data[context.dataIndex];
+                                return [
+                                    `Rest bis Klick: ${d.rest.toLocaleString()}`,
+                                    `Aktuelles Paket: ${d.pkg}`,
+                                    `Gesamtstand: ${d.tot.toLocaleString()}`,
+                                    `Stück seit WP: ${d.ist.toLocaleString()}`
+                                ];
+                            }
+                        }
+                    },
+                    datalabels: { anchor: 'end', align: 'top', rotation: -90, font: { weight: 'bold' } }
+                }
+            },
+            plugins: [ChartDataLabels]
+        });
+    }
+</script>
+</body>
+</html>

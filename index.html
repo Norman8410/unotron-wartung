@@ -151,29 +151,50 @@
         document.getElementById('authIdentifier').parentElement.style.display = state.isRegMode ? "none" : "block";
     }
 
-    async function processAuth() {
-        const iden = document.getElementById('authIdentifier').value.trim();
-        const pass = document.getElementById('authPass').value;
-        if (state.isRegMode) {
-            const user = document.getElementById('authUsername').value.trim().toLowerCase();
-            const mail = document.getElementById('authEmail').value.trim();
-            const inv = document.getElementById('authInvite').value;
-            const s = await db.ref('config/inviteCode').once('value');
-            if (!user || !mail || !pass) return alert("Felder füllen!");
-            if (inv !== s.val()) return alert("Code falsch!");
-            const check = await db.ref(`usernames/${user}`).once('value');
-            if (check.exists()) return alert("Name vergeben!");
-            try { await auth.createUserWithEmailAndPassword(mail, pass); await db.ref(`usernames/${user}`).set(mail); location.reload(); } catch(e){ alert(e.message); }
-        } else {
-            let targetMail = iden;
-            if (!iden.includes('@')) {
-                const s = await db.ref(`usernames/${iden.toLowerCase()}`).once('value');
-                if (!s.exists()) return alert("Nicht gefunden!");
-                targetMail = s.val();
+async function processAuth() {
+    const iden = document.getElementById('authIdentifier').value.trim();
+    const pass = document.getElementById('authPass').value;
+
+    if (state.isRegMode) {
+        const user = document.getElementById('authUsername').value.trim().toLowerCase();
+        const mail = document.getElementById('authEmail').value.trim();
+        const inv = document.getElementById('authInvite').value;
+        
+        const s = await db.ref('config/inviteCode').once('value');
+        if (!user || !mail || !pass) return alert("Bitte alle Felder füllen!");
+        if (inv !== s.val()) return alert("Einladungscode falsch!");
+
+        const check = await db.ref(`usernames/${user}`).once('value');
+        if (check.exists()) return alert("Benutzername bereits vergeben!");
+
+        try {
+            await auth.createUserWithEmailAndPassword(mail, pass);
+            // Speichert den Benutzernamen als Schlüssel und die E-Mail als Wert
+            await db.ref(`usernames/${user}`).set(mail); 
+            location.reload();
+        } catch(e) { 
+            alert("Fehler bei Registrierung: " + e.message); 
+        }
+    } else {
+        let targetMail = iden;
+        // Wenn keine E-Mail (kein @), dann im Pfad usernames suchen
+        if (!iden.includes('@')) {
+            const lowerIden = iden.toLowerCase();
+            const s = await db.ref(`usernames/${lowerIden}`).once('value');
+            if (!s.exists()) {
+                return alert("Benutzername nicht gefunden!");
             }
-            try { await auth.signInWithEmailAndPassword(targetMail, pass); document.getElementById('authModal').style.display = 'none'; } catch(e){ alert(e.message); }
+            targetMail = s.val(); // Hier wird die hinterlegte E-Mail geholt
+        }
+
+        try {
+            await auth.signInWithEmailAndPassword(targetMail, pass);
+            document.getElementById('authModal').style.display = 'none';
+        } catch(e) { 
+            alert("Login fehlgeschlagen: " + e.message); 
         }
     }
+}
 
     // --- ADMIN / EINSTELLER ---
     function openAdminModal() { document.getElementById('adminModal').style.display = 'flex'; document.getElementById('AdminPWInput').value = ''; document.getElementById('adminLoginView').style.display = 'block'; document.getElementById('adminManagerView').style.display = 'none'; }

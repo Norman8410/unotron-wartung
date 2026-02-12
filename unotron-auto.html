@@ -172,7 +172,6 @@
                     <small style="color:var(--bosch-red); font-weight:bold">${d.pkg} ${d.duration > 0 ? '(' + d.duration + ' Min.)' : ''}</small>
                 </div>
                 <div style="flex:1; text-align:right;">Rest: <b>${d.rest.toLocaleString()}</b></div>
-            // In der renderList Funktion von unotron-auto.html
             <div style="display:${currentUser ? 'flex' : 'none'}; gap:5px;">
                 ${d.needsReset ? 
                     `<button class="btn-reset-auto" onclick="autoReset('${d.id}', ${d.tot})">AUSTAUSCH</button>` :

@@ -108,7 +108,11 @@
                 
                 const tot = parseInt(item.Parts) || 0;
                 const off = offsets[id] || 0;
-                const ist = tot - off;
+                // Berechnung des echten Ist-Standes
+                const echterIst = tot - off; 
+                // Deckelung: Wenn echterIst größer als das Limit ist, nimm das Limit
+                const ist = Math.min(echterIst, config.maxLimit); 
+                
                 const cyc = cycles[id] || 0;
                 
                 const step = config.steps[cyc] || { target: config.maxLimit, pkg: "AUSTAUSCH" };
@@ -165,14 +169,47 @@
     }
 
     async function changeC(id, v) {
-        if(!currentUser) return;
+        if(!currentUser || !config) return;
+        
         const ref = db.ref(`maintenanceState/extraCycles/${id}`);
         const snap = await ref.once('value');
-        const newVal = (snap.val() || 0) + v;
+        const currentCyc = snap.val() || 0;
+        const nextCyc = currentCyc + v;
+
+        // --- NEUE LOGIK: Prüfung gegen das Maximum ---
+        if (v > 0) { // Nur bei Erhöhung (+) prüfen
+            // Prüfen, ob überhaupt noch ein Schritt in der Config existiert
+            if (nextCyc >= config.steps.length) {
+                alert("Maximales Wartungsintervall erreicht! Ein WP-Wechsel (RESET) ist erforderlich.");
+                return;
+            }
+
+            // Optional: Prüfen, ob der aktuelle Rest-Wert überhaupt eine Wartung zulässt
+            // (Verhindert versehentliches Klicken bei hohen Restwerten)
+            const snapState = await db.ref('maintenanceState').once('value');
+            const state = snapState.val() || {};
+            const raw = state.cloudRawData.find(item => (item.StationNo || item.STATIONNO) == id);
+            if (raw) {
+                const tot = parseInt(raw.Parts) || 0;
+                const off = (state.agieOffsets && state.agieOffsets[id]) || 0;
+                const ist = tot - off;
+                const currentStep = config.steps[currentCyc] || { target: config.maxLimit };
+                
+                // Wenn man noch weit vom Ziel entfernt ist, Sicherheitsabfrage
+                if (ist < (currentStep.target * 0.8)) { // Beispiel: Warnung wenn erst 80% erreicht
+                    if(!confirm("Die Wartung ist laut Stückzahl noch nicht fällig. Trotzdem verbuchen?")) return;
+                }
+            }
+        }
+
+        // Unter 0 darf der Zyklus nicht fallen
+        if (nextCyc < 0) return;
+
+        // Speichern
         await db.ref(`dashboardAssignments/A${id}`).set("");
-        await ref.set(newVal);
-        // Korrektur: Variable v statt change nutzen
-        await writeLog(v > 0 ? "WARTUNG_OK" : "KORREKTUR", `A-${id}`, `Zähler um ${v} geändert (Neu: ${newVal})`);
+        await ref.set(nextCyc);
+        
+        await writeLog(v > 0 ? "WARTUNG_OK" : "KORREKTUR", `A-${id}`, `Zähler von ${currentCyc} auf ${nextCyc} geändert.`);
     }
 
     async function autoReset(id, tot) {

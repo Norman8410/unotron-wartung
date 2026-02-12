@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Unotron Automatik - Detailansicht</title>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <style>
+        :root { 
+            --bosch-red: #d50000; --bosch-blue: #003a6c; --bosch-green: #008a4f; 
+            --bosch-gray: #eff1f2; --bosch-dark-red: #8b0000;
+        }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bosch-gray); margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .top-bar { height: 45px; background: #007bc0; display: flex; align-items: center; padding: 0 15px; color: white; font-weight: bold; justify-content: space-between; }
+        .back-btn { background: rgba(255,255,255,0.2); color: white; text-decoration: none; padding: 5px 15px; border-radius: 4px; font-size: 0.9em; }
+        .back-btn:hover { background: rgba(255,255,255,0.3); }
+        .main-content { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 20px; overflow: hidden; }
+        .chart-container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); flex: 1; min-height: 0; position: relative; }
+        h2 { margin-top: 0; color: var(--bosch-blue); }
+    </style>
+</head>
+<body>
+
+<div class="top-bar">
+    <span>Unotron Automatik - Linien Übersicht</span>
+    <a href="index.html" class="back-btn">← Zurück zum Dashboard</a>
+</div>
+
+<div class="main-content">
+    <div class="chart-container">
+        <h2>Reststückzahl bis zur nächsten Wartung</h2>
+        <canvas id="autoChart"></canvas>
+    </div>
+</div>
+
+<script>
+    // Firebase Config (muss identisch mit index.html sein)
+    const firebaseConfig = {
+        databaseURL: "https://wartung-3d602-default-rtdb.europe-west1.firebasedatabase.app/"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let chartInstance = null;
+
+    // Linien-Definitionen für die Summenbildung
+    const linienDef = [
+        { id: "100", subs: ["101","102","103","104","113","114","115","116"] },
+        { id: "200", subs: ["117","112","111","110","109","108","107","106"] },
+        { id: "300", subs: ["118","119","120","121","122","123","124","125"] }
+    ];
+
+    // Wir laden Konfiguration und Daten
+    Promise.all([
+        db.ref('maintenanceConfig').once('value'),
+        db.ref('maintenanceState').once('value')
+    ]).then(snapshots => {
+        const config = snapshots[0].val();
+        const state = snapshots[1].val();
+        
+        if (config && state) {
+            processAndRender(config.unotronAuto, state);
+        }
+    });
+
+    function processAndRender(cfg, state) {
+        // Rohdaten der Einzel-Unotrons holen
+        const unoRaw = (state.unotron && state.unotron.cloudRawData) ? state.unotron.cloudRawData : [];
+        const autoOffsets = state.unotronAutoOffsets || {};
+        const extraCycles = state.extraCycles || {};
+
+        const data = linienDef.map(linie => {
+            // Summe der Einzel-Parts für diese Linie bilden
+            let summeTotal = 0;
+            unoRaw.forEach(item => {
+                const sId = (item.StationNo || item.STATIONNO || item.stationNo || "").toString();
+                if (linie.subs.includes(sId)) {
+                    summeTotal += (parseInt(item.Parts || item["COUNT(*)"] || item.parts) || 0);
+                }
+            });
+
+            const offset = autoOffsets[linie.id] || 0;
+            const cyc = extraCycles[linie.id] || 0;
+            const ist = summeTotal - offset;
+            
+            const step = cfg.steps[cyc] || { target: cfg.maxLimit, pkg: "RESET" };
+            const isOverMax = ist >= cfg.maxLimit;
+            const targetVal = isOverMax ? cfg.maxLimit : step.target;
+            const rest = targetVal - ist;
+
+            return {
+                label: "Linie " + linie.id,
+                rest: rest,
+                pkg: isOverMax ? "WP RESET" : step.pkg,
+                tot: summeTotal,
+                ist: ist
+            };
+        });
+
+        renderChart(data, cfg);
+    }
+
+    function renderChart(data, cfg) {
+        const ctx = document.getElementById('autoChart').getContext('2d');
+        
+        if (chartInstance) chartInstance.destroy();
+
+        chartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.map(d => d.label),
+                datasets: [{
+                    data: data.map(d => d.rest),
+                    backgroundColor: data.map(d => {
+                        if (d.rest <= 0) return '#8b0000'; // Overdue
+                        if (d.rest <= cfg.crit) return '#d50000'; // Critical
+                        if (d.rest <= cfg.warn) return '#ffcc00'; // Warning
+                        return '#008a4f'; // OK
+                    }),
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                const d = data[ctx.dataIndex];
+                                let lines = [
+                                    `Rest: ${d.rest.toLocaleString()} Stk.`,
+                                    `Paket: ${d.pkg}`,
+                                    `Gesamt (Summe): ${d.tot.toLocaleString()}`,
+                                    `Seit Reset: ${d.ist.toLocaleString()}`
+                                ];
+                                return lines;
+                            }
+                        }
+                    },
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'top',
+                        font: { weight: 'bold' },
+                        formatter: (val) => val.toLocaleString()
+                    }
+                },
+                scales: {
+                    y: { 
+                        beginAtZero: false,
+                        title: { display: true, text: 'Reststückzahl' }
+                    }
+                }
+            },
+            plugins: [ChartDataLabels]
+        });
+    }
+</script>
+
+</body>
+</html>

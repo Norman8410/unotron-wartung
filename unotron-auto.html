@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Unotron Automatik - Detailansicht</title>
+    <title>Unotron Automatik Wartung - Detailansicht</title>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
@@ -14,152 +14,212 @@
             --bosch-gray: #eff1f2; --bosch-dark-red: #8b0000;
         }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bosch-gray); margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .top-bar { height: 45px; background: #007bc0; display: flex; align-items: center; padding: 0 15px; color: white; font-weight: bold; justify-content: space-between; }
-        .back-btn { background: rgba(255,255,255,0.2); color: white; text-decoration: none; padding: 5px 15px; border-radius: 4px; font-size: 0.9em; }
-        .back-btn:hover { background: rgba(255,255,255,0.3); }
-        .main-content { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 20px; overflow: hidden; }
-        .chart-container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); flex: 1; min-height: 0; position: relative; }
-        h2 { margin-top: 0; color: var(--bosch-blue); }
+        .top-bar { height: 45px; background: linear-gradient(90deg, #d50000 0%, #003a6c 50%, #008a4f 100%); display: flex; align-items: center; padding: 0 15px; color: white; font-weight: bold; }
+        .header { background: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .main-layout { display: flex; flex: 1; padding: 20px; gap: 20px; overflow: hidden; }
+        .chart-area { flex: 3; background: white; padding: 20px; border-top: 4px solid var(--bosch-blue); border-radius: 4px; position: relative; }
+        .sidebar { flex: 1.5; background: white; border-top: 4px solid var(--bosch-blue); overflow-y: auto; padding: 10px; border-radius: 4px; }
+        .row { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; gap: 10px; border-left: 8px solid #ccc; margin-bottom: 5px; transition: 0.2s; }
+        .row:hover { background: #f9f9f9; }
+        .btn-cycle { padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; border-radius: 2px; }
+        .btn-cycle:hover:not(:disabled) { background: var(--bosch-blue); color: white; }
+        .btn-cycle:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-reset-auto { background: var(--bosch-red); color: white; border: none; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 2px; }
+        @keyframes blink-red { 0% { background: #fff; } 50% { background: #ffcccc; } 100% { background: #fff; } }
+        .blink { animation: blink-red 1s infinite; }
     </style>
 </head>
-<body>
+<body onmousemove="resetTimer()">
 
-<div class="top-bar">
-    <span>Unotron Automatik - Linien Übersicht</span>
-    <a href="index.html" class="back-btn">← Zurück zum Dashboard</a>
+<div class="top-bar">Unotron Automatik Wartungsübersicht</div>
+<div class="header">
+    <div><span style="font-size: 24px; color: var(--bosch-red); font-weight: 900;">BOSCH</span></div>
+    <button style="padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; color: var(--bosch-blue);" onclick="window.close()">❌ Schließen</button>
 </div>
 
-<div class="main-content">
-    <div class="chart-container">
-        <h2>Reststückzahl bis zur nächsten Wartung</h2>
-        <canvas id="autoChart"></canvas>
-    </div>
+<div class="main-layout">
+    <div class="chart-area"><canvas id="mainChart"></canvas></div>
+    <div class="sidebar" id="machineList">Lade Unotron Auto Daten...</div>
 </div>
 
 <script>
-    // Firebase Config (muss identisch mit index.html sein)
-    const firebaseConfig = {
-        databaseURL: "https://wartung-3d602-default-rtdb.europe-west1.firebasedatabase.app/"
+    const firebaseConfig = { 
+        apiKey: "AIzaSyD6xGCtU-felOyO_BRsFnVlB4yhC46FgYg", 
+        authDomain: "bosch-agie-wartung.firebaseapp.com", 
+        databaseURL: "https://bosch-agie-wartung-default-rtdb.europe-west1.firebasedatabase.app", 
+        projectId: "bosch-agie-wartung" 
     };
     firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
+    const db = firebase.database(), auth = firebase.auth();
+    
+    let chart = null, currentUser = null, inactivityTimer;
+    let config = null; 
 
-    let chartInstance = null;
-
-    // Linien-Definitionen für die Summenbildung
-    const linienDef = [
-        { id: "100", subs: ["101","102","103","104","113","114","115","116"] },
-        { id: "200", subs: ["117","112","111","110","109","108","107","106"] },
-        { id: "300", subs: ["118","119","120","121","122","123","124","125"] }
-    ];
-
-    // Wir laden Konfiguration und Daten
-    Promise.all([
-        db.ref('maintenanceConfig').once('value'),
-        db.ref('maintenanceState').once('value')
-    ]).then(snapshots => {
-        const config = snapshots[0].val();
-        const state = snapshots[1].val();
-        
-        if (config && state) {
-            processAndRender(config.unotronAuto, state);
-        }
-    });
-
-    function processAndRender(cfg, state) {
-        // Rohdaten der Einzel-Unotrons holen
-        const unoRaw = (state.unotron && state.unotron.cloudRawData) ? state.unotron.cloudRawData : [];
-        const autoOffsets = state.unotronAutoOffsets || {};
-        const extraCycles = state.extraCycles || {};
-
-        const data = linienDef.map(linie => {
-            // Summe der Einzel-Parts für diese Linie bilden
-            let summeTotal = 0;
-            unoRaw.forEach(item => {
-                const sId = (item.StationNo || item.STATIONNO || item.stationNo || "").toString();
-                if (linie.subs.includes(sId)) {
-                    summeTotal += (parseInt(item.Parts || item["COUNT(*)"] || item.parts) || 0);
-                }
-            });
-
-            const offset = autoOffsets[linie.id] || 0;
-            const cyc = extraCycles[linie.id] || 0;
-            const ist = summeTotal - offset;
-            
-            const step = cfg.steps[cyc] || { target: cfg.maxLimit, pkg: "RESET" };
-            const isOverMax = ist >= cfg.maxLimit;
-            const targetVal = isOverMax ? cfg.maxLimit : step.target;
-            const rest = targetVal - ist;
-
-            return {
-                label: "Linie " + linie.id,
-                rest: rest,
-                pkg: isOverMax ? "WP RESET" : step.pkg,
-                tot: summeTotal,
-                ist: ist
-            };
-        });
-
-        renderChart(data, cfg);
+    function resetTimer() {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => { window.close(); }, 70000);
     }
 
-    function renderChart(data, cfg) {
-        const ctx = document.getElementById('autoChart').getContext('2d');
-        
-        if (chartInstance) chartInstance.destroy();
+    async function writeLog(action, machine, details) {
+        if (!auth.currentUser) return;
+        await db.ref('logs').push({
+            zeit: new Date().toLocaleString('de-DE'),
+            user: auth.currentUser.email,
+            seite: 'unotron-auto.html',
+            aktion: action,
+            maschine: machine,
+            info: details
+        });
+    }
 
-        chartInstance = new Chart(ctx, {
+    function getDuration(pkgString, timeTable) {
+        if (!pkgString || pkgString.includes("AUSTAUSCH") || !timeTable) return 0;
+        const parts = pkgString.split(/[\/\s,]+/);
+        return parts.reduce((acc, p) => {
+            let key = p.toUpperCase().trim(); 
+            if(key && !key.startsWith("P")) key = "P" + key;
+            return acc + (timeTable[key] || 0);
+        }, 0);
+    }
+
+    auth.onAuthStateChanged(user => { 
+        currentUser = user; 
+        loadData();
+    });
+
+    function loadData() {
+        // Konfiguration laden (NEUER PFAD)
+        db.ref('maintenanceConfig/unotronAuto').on('value', cfgSnap => {
+            config = cfgSnap.val();
+            // Status/Daten laden (NEUER PFAD)
+            db.ref('maintenanceStateUnotronAuto').on('value', snap => {
+                if(!config) return;
+                const val = snap.val() || {};
+                const raw = val.cloudRawData || [];
+                const offsets = val.unotronOffsets || {}; 
+                const cycles = val.extraCycles || {};
+                
+                const data = raw.map(item => {
+                    const id = item.STATIONNO || item.StationNo;
+                    if(!id) return null;
+                    
+                    const tot = parseInt(item["COUNT(*)"] || item.Parts) || 0;
+                    const off = offsets[id] || 0;
+                    const ist = tot - off; 
+                    const cyc = parseInt(cycles[id]) || 0; 
+                    
+                    const step = config.steps ? config.steps[cyc] : null;
+                    let pkgName = "AUSTAUSCH";
+                    let targetVal = config.maxLimit;
+                    let isOverCycle = true;
+                    
+                    if (step) {
+                        pkgName = step.pkg;
+                        targetVal = step.target;
+                        isOverCycle = false;
+                    }
+                    
+                    const needsReset = ist >= config.maxLimit || isOverCycle;
+                    const rest = targetVal - ist; 
+                    const duration = getDuration(pkgName, config.times);
+
+                    return { 
+                        id, rest, ist, tot, cyc, 
+                        pkg: pkgName, 
+                        duration, 
+                        needsReset, 
+                        color: getC(rest, needsReset) 
+                    };
+                }).filter(d => d !== null).sort((a,b) => a.rest - b.rest);
+
+                renderList(data);
+                renderChart(data);
+            });
+        });
+    }
+
+    function getC(r, reset) {
+        if(reset || r <= 0) return "#8b0000"; 
+        if(r <= (config.crit || 60)) return "#d50000"; 
+        if(r <= (config.warn || 500)) return "#ffa500"; 
+        return "#008a4f"; 
+    }
+
+    function renderList(data) {
+        document.getElementById('machineList').innerHTML = data.map(d => `
+            <div class="row ${d.rest <= 0 ? 'blink' : ''}" style="border-left-color:${d.color}">
+                <div style="flex:2">
+                    <b>UA-${d.id}</b> <span style="font-size:0.8em; color:#666;">(Schritt: ${d.cyc + 1})</span><br>
+                    <small style="color:var(--bosch-red); font-weight:bold">${d.pkg} ${d.duration > 0 ? '(' + d.duration + ' Min.)' : ''}</small>
+                </div>
+                <div style="flex:1; text-align:right;">Rest: <b>${d.rest.toLocaleString()}</b></div>
+                <div style="display:${currentUser ? 'flex' : 'none'}; gap:5px;">
+                    ${d.needsReset ? 
+                        `<button class="btn-reset-auto" onclick="autoReset('${d.id}', ${d.tot})">AUSTAUSCH</button>` :
+                        `<button class="btn-cycle" onclick="changeC('${d.id}', 1)" ${d.rest > (config.warn || 500) ? 'disabled' : ''}>+</button>`
+                    }
+                </div>
+            </div>`).join('');
+    }
+
+    async function changeC(id, v) {
+        const ref = db.ref(`maintenanceStateUnotronAuto/extraCycles/${id}`);
+        const snap = await ref.once('value');
+        const next = (parseInt(snap.val()) || 0) + v;
+        await ref.set(next);
+        await writeLog("WARTUNG_OK", `UA-${id}`, `Schritt auf ${next + 1}`);
+    }
+
+    async function autoReset(id, tot) {
+        if(!confirm(`Austausch für Unotron-Auto-${id} bestätigen?`)) return;
+        await db.ref(`maintenanceStateUnotronAuto/unotronOffsets/${id}`).set(tot);
+        await db.ref(`maintenanceStateUnotronAuto/extraCycles/${id}`).set(0);
+        await writeLog("RESET", `UA-${id}`, `Stand: ${tot}`);
+    }
+
+    function renderChart(data) {
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        if(chart) chart.destroy();
+        chart = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: data.map(d => d.label),
-                datasets: [{
-                    data: data.map(d => d.rest),
-                    backgroundColor: data.map(d => {
-                        if (d.rest <= 0) return '#8b0000'; // Overdue
-                        if (d.rest <= cfg.crit) return '#d50000'; // Critical
-                        if (d.rest <= cfg.warn) return '#ffcc00'; // Warning
-                        return '#008a4f'; // OK
-                    }),
-                    borderRadius: 5
-                }]
+                labels: data.map(d => "UA-" + d.id),
+                datasets: [{ data: data.map(d => d.rest), backgroundColor: data.map(d => d.color) }]
             },
             options: {
-                responsive: true,
-                maintainAspectRatio: false,
+                responsive: true, maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
                     tooltip: {
                         callbacks: {
                             label: function(ctx) {
                                 const d = data[ctx.dataIndex];
-                                let lines = [
-                                    `Rest: ${d.rest.toLocaleString()} Stk.`,
-                                    `Paket: ${d.pkg}`,
-                                    `Gesamt (Summe): ${d.tot.toLocaleString()}`,
-                                    `Seit Reset: ${d.ist.toLocaleString()}`
-                                ];
+                                let lines = [];
+                                if (d.rest <= 0) {
+                                    lines.push(`⚠️ Fällig seit: ${Math.abs(d.rest).toLocaleString()} Stk.`);
+                                } else {
+                                    lines.push(`Rest bis Wartung: ${d.rest.toLocaleString()} Stk.`);
+                                }
+                                lines.push(`Paket offen: ${d.pkg}`);
+                                if(d.duration > 0) {
+                                    lines.push(`Dauer: ca. ${d.duration} Min.`);
+                                }
+                                lines.push(`Gesamtstückzahl: ${d.tot.toLocaleString()}`);
+                                lines.push(`Seit letztem WP-Wechsel: ${d.ist.toLocaleString()}`);
                                 return lines;
                             }
                         }
                     },
-                    datalabels: {
-                        anchor: 'end',
-                        align: 'top',
-                        font: { weight: 'bold' },
-                        formatter: (val) => val.toLocaleString()
+                    datalabels: { 
+                        anchor: 'end', align: 'top', rotation: -90, font: { weight: 'bold' },
+                        formatter: (val) => val.toLocaleString() 
                     }
                 },
-                scales: {
-                    y: { 
-                        beginAtZero: false,
-                        title: { display: true, text: 'Reststückzahl' }
-                    }
-                }
+                scales: { y: { beginAtZero: false } }
             },
             plugins: [ChartDataLabels]
         });
     }
 </script>
-
 </body>
 </html>

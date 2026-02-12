@@ -31,7 +31,7 @@
 </head>
 <body onmousemove="resetTimer()">
 
-<div class="top-bar">Unotron Automatik Wartungsübersicht</div>
+<div class="top-bar">Unotron Automatik (Handling) Übersicht</div>
 <div class="header">
     <div><span style="font-size: 24px; color: var(--bosch-red); font-weight: 900;">BOSCH</span></div>
     <button style="padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; color: var(--bosch-blue);" onclick="window.close()">❌ Schließen</button>
@@ -39,7 +39,7 @@
 
 <div class="main-layout">
     <div class="chart-area"><canvas id="mainChart"></canvas></div>
-    <div class="sidebar" id="machineList">Lade Unotron Auto Daten...</div>
+    <div class="sidebar" id="machineList">Lade Daten...</div>
 </div>
 
 <script>
@@ -53,7 +53,14 @@
     const db = firebase.database(), auth = firebase.auth();
     
     let chart = null, currentUser = null, inactivityTimer;
-    let config = null; 
+    let config = null;
+
+    // DEFINITION DER GRUPPEN (Welche Unotrons gehören zu welcher Linie)
+    const groups = {
+        "100": [101, 102, 103, 104, 113, 114, 115, 116],
+        "200": [117, 112, 111, 110, 109, 108, 107, 106],
+        "300": [118, 119, 120, 121, 122, 123, 124, 125]
+    };
 
     function resetTimer() {
         clearTimeout(inactivityTimer);
@@ -88,52 +95,64 @@
     });
 
     function loadData() {
-        // Konfiguration laden (NEUER PFAD)
+        // 1. Config laden
         db.ref('maintenanceConfig/unotronAuto').on('value', cfgSnap => {
             config = cfgSnap.val();
-            // Status/Daten laden (NEUER PFAD)
-            db.ref('maintenanceStateUnotronAuto').on('value', snap => {
-                if(!config) return;
-                const val = snap.val() || {};
-                const raw = val.cloudRawData || [];
-                const offsets = val.unotronOffsets || {}; 
-                const cycles = val.extraCycles || {};
+            
+            // 2. RAW Daten der normalen Unotron laden (zum Summieren)
+            db.ref('maintenanceStateUnotron/cloudRawData').on('value', rawSnap => {
+                const rawData = rawSnap.val() || [];
                 
-                const data = raw.map(item => {
-                    const id = item.STATIONNO || item.StationNo;
-                    if(!id) return null;
+                // 3. Status (Offsets/Cycles) der Automatik laden
+                db.ref('maintenanceStateUnotronAuto').on('value', stateSnap => {
+                    if(!config) return;
+                    const stateVal = stateSnap.val() || {};
+                    const offsets = stateVal.unotronOffsets || {}; 
+                    const cycles = stateVal.extraCycles || {};
                     
-                    const tot = parseInt(item["COUNT(*)"] || item.Parts) || 0;
-                    const off = offsets[id] || 0;
-                    const ist = tot - off; 
-                    const cyc = parseInt(cycles[id]) || 0; 
-                    
-                    const step = config.steps ? config.steps[cyc] : null;
-                    let pkgName = "AUSTAUSCH";
-                    let targetVal = config.maxLimit;
-                    let isOverCycle = true;
-                    
-                    if (step) {
-                        pkgName = step.pkg;
-                        targetVal = step.target;
-                        isOverCycle = false;
-                    }
-                    
-                    const needsReset = ist >= config.maxLimit || isOverCycle;
-                    const rest = targetVal - ist; 
-                    const duration = getDuration(pkgName, config.times);
+                    // Berechne die Summen
+                    const calculatedData = Object.keys(groups).map(groupId => {
+                        // Summiere Teile aller Maschinen in der Gruppe
+                        let currentTotal = 0;
+                        groups[groupId].forEach(stationId => {
+                            const match = rawData.find(r => (r.STATIONNO || r.StationNo) == stationId);
+                            if (match) {
+                                currentTotal += (parseInt(match["COUNT(*)"] || match.Parts) || 0);
+                            }
+                        });
 
-                    return { 
-                        id, rest, ist, tot, cyc, 
-                        pkg: pkgName, 
-                        duration, 
-                        needsReset, 
-                        color: getC(rest, needsReset) 
-                    };
-                }).filter(d => d !== null).sort((a,b) => a.rest - b.rest);
+                        const off = offsets[groupId] || 0;
+                        const ist = currentTotal - off; 
+                        const cyc = parseInt(cycles[groupId]) || 0; 
+                        
+                        const step = config.steps ? config.steps[cyc] : null;
+                        let pkgName = "AUSTAUSCH";
+                        let targetVal = config.maxLimit;
+                        let isOverCycle = true;
+                        
+                        if (step) {
+                            pkgName = step.pkg;
+                            targetVal = step.target;
+                            isOverCycle = false;
+                        }
+                        
+                        const needsReset = ist >= config.maxLimit || isOverCycle;
+                        const rest = targetVal - ist; 
+                        const duration = getDuration(pkgName, config.times);
 
-                renderList(data);
-                renderChart(data);
+                        return { 
+                            id: groupId, 
+                            rest, ist, tot: currentTotal, cyc, 
+                            pkg: pkgName, 
+                            duration, 
+                            needsReset, 
+                            color: getC(rest, needsReset) 
+                        };
+                    }).sort((a,b) => a.rest - b.rest);
+
+                    renderList(calculatedData);
+                    renderChart(calculatedData);
+                });
             });
         });
     }
@@ -149,7 +168,7 @@
         document.getElementById('machineList').innerHTML = data.map(d => `
             <div class="row ${d.rest <= 0 ? 'blink' : ''}" style="border-left-color:${d.color}">
                 <div style="flex:2">
-                    <b>UA-${d.id}</b> <span style="font-size:0.8em; color:#666;">(Schritt: ${d.cyc + 1})</span><br>
+                    <b>Linie ${d.id}</b> <span style="font-size:0.8em; color:#666;">(Schritt: ${d.cyc + 1})</span><br>
                     <small style="color:var(--bosch-red); font-weight:bold">${d.pkg} ${d.duration > 0 ? '(' + d.duration + ' Min.)' : ''}</small>
                 </div>
                 <div style="flex:1; text-align:right;">Rest: <b>${d.rest.toLocaleString()}</b></div>
@@ -171,7 +190,7 @@
     }
 
     async function autoReset(id, tot) {
-        if(!confirm(`Austausch für Unotron-Auto-${id} bestätigen?`)) return;
+        if(!confirm(`Austausch für Unotron-Auto-Linie ${id} bestätigen?`)) return;
         await db.ref(`maintenanceStateUnotronAuto/unotronOffsets/${id}`).set(tot);
         await db.ref(`maintenanceStateUnotronAuto/extraCycles/${id}`).set(0);
         await writeLog("RESET", `UA-${id}`, `Stand: ${tot}`);
@@ -183,7 +202,7 @@
         chart = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: data.map(d => "UA-" + d.id),
+                labels: data.map(d => "L-" + d.id),
                 datasets: [{ data: data.map(d => d.rest), backgroundColor: data.map(d => d.color) }]
             },
             options: {
@@ -204,8 +223,7 @@
                                 if(d.duration > 0) {
                                     lines.push(`Dauer: ca. ${d.duration} Min.`);
                                 }
-                                lines.push(`Gesamtstückzahl: ${d.tot.toLocaleString()}`);
-                                lines.push(`Seit letztem WP-Wechsel: ${d.ist.toLocaleString()}`);
+                                lines.push(`Summierte Stückzahl: ${d.tot.toLocaleString()}`);
                                 return lines;
                             }
                         }

@@ -23,10 +23,8 @@
         .row { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; gap: 10px; border-left: 8px solid #ccc; margin-bottom: 5px; transition: 0.2s; }
         .row:hover { background: #f9f9f9; }
         
-        /* Buttons Styling */
         .btn-cycle { padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; border-radius: 2px; transition: 0.2s; }
         .btn-cycle:hover:not(:disabled) { background: var(--bosch-blue); color: white; }
-        /* Deaktivierter Button Style */
         .btn-cycle:disabled { opacity: 0.3; cursor: not-allowed; background: #eee; color: #999; border-color: #ddd; }
         
         .btn-reset-auto { background: var(--bosch-red); color: white; border: none; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 2px; }
@@ -66,7 +64,20 @@
         inactivityTimer = setTimeout(() => { window.close(); }, 70000);
     }
 
-    // Dauer berechnen
+    // --- NEU: Logging Funktion ---
+    async function writeLog(action, machine, details) {
+        if (!auth.currentUser) return;
+        const logEntry = {
+            zeit: new Date().toLocaleString('de-DE'),
+            user: auth.currentUser.email,
+            seite: 'agie.html',
+            aktion: action,
+            maschine: machine,
+            info: details
+        };
+        await db.ref('logs').push(logEntry);
+    }
+
     function getDuration(pkgString, timeTable) {
         if (!pkgString || pkgString.includes("AUSTAUSCH") || !timeTable) return 0;
         return pkgString.split('/').reduce((acc, p) => {
@@ -77,14 +88,12 @@
 
     auth.onAuthStateChanged(user => { currentUser = user; });
 
-    // 1. Config laden
     db.ref('maintenanceConfig/agie').on('value', cfgSnap => {
         config = cfgSnap.val();
         if(!config) return document.getElementById('machineList').innerHTML = "Fehler: Keine Config gefunden.";
         loadMachineData();
     });
 
-    // 2. Daten laden und verarbeiten
     function loadMachineData() {
         db.ref('maintenanceState').on('value', snap => {
             if(!config) return;
@@ -97,33 +106,20 @@
                 const id = item.StationNo || item.STATIONNO;
                 if(!id) return null;
                 
-                const tot = parseInt(item.Parts) || 0;     // Gesamtstückzahl
-                const off = offsets[id] || 0;              // Offset (Stückzahl beim letzten Reset)
-                const ist = tot - off;                     // Stückzahl seit letztem Wechsel
-                const cyc = cycles[id] || 0;               // Aktueller Zyklus-Zähler
+                const tot = parseInt(item.Parts) || 0;
+                const off = offsets[id] || 0;
+                const ist = tot - off;
+                const cyc = cycles[id] || 0;
                 
-                // Welches Paket ist dran?
                 const step = config.steps[cyc] || { target: config.maxLimit, pkg: "AUSTAUSCH" };
                 const isOverMax = ist >= config.maxLimit;
                 
                 const targetVal = isOverMax ? config.maxLimit : step.target;
                 const rest = targetVal - ist;
                 const pkgName = isOverMax ? "WP RESET / AUSTAUSCH" : step.pkg;
-                
-                // Dauer berechnen
                 const duration = getDuration(step.pkg, config.times);
 
-                return { 
-                    id, 
-                    rest,       // Rest bis zur nächsten Wartung
-                    ist,        // Stückzahl seit letztem Reset (1.6)
-                    tot,        // Gesamtstückzahl (1.5)
-                    cyc,        // Zähler (2.2)
-                    pkg: pkgName, // Paketname (1.3)
-                    duration,   // Dauer (1.4)
-                    needsReset: isOverMax, 
-                    color: getC(rest, isOverMax) 
-                };
+                return { id, rest, ist, tot, cyc, pkg: pkgName, duration, needsReset: isOverMax, color: getC(rest, isOverMax) };
             }).filter(d => d !== null).sort((a,b) => a.rest - b.rest);
 
             renderList(data);
@@ -132,17 +128,15 @@
     }
 
     function getC(r, reset) {
-        if(reset || r <= 0) return "#8b0000"; // Überfällig (Dunkelrot)
-        if(r <= config.crit) return "#d50000"; // Kritisch (Rot)
-        if(r <= config.warn) return "#ffa500"; // Warnung (Gelb)
-        return "#008a4f"; // OK (Grün)
+        if(reset || r <= 0) return "#8b0000"; 
+        if(r <= config.crit) return "#d50000"; 
+        if(r <= config.warn) return "#ffa500"; 
+        return "#008a4f"; 
     }
 
     function renderList(data) {
         document.getElementById('machineList').innerHTML = data.map(d => {
-            // 3.1: Plus-Button deaktiviert, solange Rest > Warnschwelle
             const isPlusDisabled = d.rest > config.warn; 
-            // Korrektur-Button (-) deaktiviert, wenn Zähler bereits auf 0
             const isMinusDisabled = d.cyc <= 0;
             
             return `
@@ -177,6 +171,8 @@
         const newVal = (snap.val() || 0) + v;
         await db.ref(`dashboardAssignments/A${id}`).set("");
         await ref.set(newVal);
+        // Korrektur: Variable v statt change nutzen
+        await writeLog(v > 0 ? "WARTUNG_OK" : "KORREKTUR", `A-${id}`, `Zähler um ${v} geändert (Neu: ${newVal})`);
     }
 
     async function autoReset(id, tot) {
@@ -184,20 +180,17 @@
         await db.ref(`maintenanceState/agieOffsets/${id}`).set(tot);
         await db.ref(`maintenanceState/extraCycles/${id}`).set(0);
         await db.ref(`dashboardAssignments/A${id}`).set("");
+        await writeLog("RESET", `A-${id}`, `Vollständiger Austausch bei Stand: ${tot}`);
     }
 
     function renderChart(data) {
         const ctx = document.getElementById('mainChart').getContext('2d');
         if(chart) chart.destroy();
-        
         chart = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: data.map(d => "A-" + d.id),
-                datasets: [{ 
-                    data: data.map(d => d.rest), 
-                    backgroundColor: data.map(d => d.color) 
-                }]
+                datasets: [{ data: data.map(d => d.rest), backgroundColor: data.map(d => d.color) }]
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
@@ -208,15 +201,10 @@
                             label: function(ctx) {
                                 const d = data[ctx.dataIndex];
                                 let lines = [];
-                                if (d.rest <= 0) {
-                                    lines.push(`⚠️ Fällig seit: ${Math.abs(d.rest).toLocaleString()} Stk.`);
-                                } else {
-                                    lines.push(`Rest bis Wartung: ${d.rest.toLocaleString()} Stk.`);
-                                }
+                                if (d.rest <= 0) lines.push(`⚠️ Fällig seit: ${Math.abs(d.rest).toLocaleString()} Stk.`);
+                                else lines.push(`Rest bis Wartung: ${d.rest.toLocaleString()} Stk.`);
                                 lines.push(`Paket offen: ${d.pkg}`);
-                                if(d.duration > 0) {
-                                    lines.push(`Dauer: ca. ${d.duration} Min.`);
-                                }
+                                if(d.duration > 0) lines.push(`Dauer: ca. ${d.duration} Min.`);
                                 lines.push(`Gesamtstückzahl: ${d.tot.toLocaleString()}`);
                                 lines.push(`Seit letztem WP-Wechsel: ${d.ist.toLocaleString()}`);
                                 return lines;
@@ -224,16 +212,11 @@
                         }
                     },
                     datalabels: { 
-                        anchor: 'end', 
-                        align: 'top', 
-                        rotation: -90, 
-                        font: { weight: 'bold' },
+                        anchor: 'end', align: 'top', rotation: -90, font: { weight: 'bold' },
                         formatter: (val) => val.toLocaleString() 
                     }
                 },
-                scales: {
-                    y: { beginAtZero: true }
-                }
+                scales: { y: { beginAtZero: true } }
             },
             plugins: [ChartDataLabels]
         });

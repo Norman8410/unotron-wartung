@@ -259,38 +259,76 @@
         renderCol('list-he', 'count-he', state.he, 'H', state.maintConfig.he); 
     }
 
-    function renderCol(listId, countId, raw, prefix, cfg) {
+function renderCol(listId, countId, raw, prefix, cfg) {
         if(!raw || !raw.cloudRawData || !cfg) return;
         let totalMin = 0;
+        
         const data = raw.cloudRawData.map(item => {
-            const sId = item.StationNo || item.STATIONNO; if(!sId) return null;
-            const cyc = (raw.extraCycles && raw.extraCycles[sId]) || 0;
-            const offK = prefix==='A'?'agieOffsets':(prefix==='H'?'heOffsets':'unotronOffsets');
-            const ist = (parseInt(item.Parts || item["COUNT(*)"]) || 0) - ((raw[offK] && raw[offK][sId]) || 0);
-            const step = cfg.steps[cyc] || { target: cfg.maxLimit, pkg: "RESET" };
-            const over = ist >= cfg.maxLimit, rest = (over ? cfg.maxLimit : step.target) - ist;
-            const dur = getDuration(over ? "RESET" : step.pkg, cfg.times);
-            if(rest < cfg.warn) totalMin += dur;
-            return { id: prefix+"-"+sId, sId, rest, pkg: over ? "WP RESET" : step.pkg, dur, warn: cfg.warn, crit: cfg.crit, isReset: over, rawTotal: (parseInt(item.Parts || item["COUNT(*)"]) || 0) };
-        }).filter(m => m && m.rest < m.warn).sort((a,b) => a.rest - b.rest);
+            const sId = item.StationNo || item.STATIONNO || item.stationNo; 
+            if(!sId) return null;
 
-        document.getElementById(countId).innerHTML = `<span>${data.length}</span> ` + (totalMin > 0 ? `<span class="time-badge">⏳ ${formatTotalTime(totalMin)}</span>` : "");
+            // 1. Aktuelle Stückzahl holen (flexibel je nach API-Feldname)
+            const aktuellerStand = parseInt(item.Parts || item["COUNT(*)"] || item.parts) || 0;
+            
+            // 2. Offsets und Zyklen holen
+            const offK = prefix === 'A' ? 'agieOffsets' : (prefix === 'H' ? 'heOffsets' : 'unotronOffsets');
+            const offset = (raw[offK] && raw[offK][sId]) || 0;
+            const cyc = (raw.extraCycles && raw.extraCycles[sId]) || 0;
+
+            // 3. Berechnung "Ist" (Stückzahl seit letztem Reset)
+            const ist = aktuellerStand - offset;
+
+            // 4. Zielwert und Paket ermitteln
+            const step = cfg.steps[cyc] || { target: cfg.maxLimit, pkg: "RESET" };
+            const isOverMax = ist >= cfg.maxLimit;
+            const targetVal = isOverMax ? cfg.maxLimit : step.target;
+            
+            // 5. WICHTIG: Rest berechnen und gegen Warnschwelle prüfen
+            const rest = targetVal - ist;
+            const dur = getDuration(isOverMax ? "RESET" : step.pkg, cfg.times);
+
+            // Nur zurückgeben, wenn die Wartung fällig oder im Warnbereich ist
+            if (rest <= cfg.warn) {
+                totalMin += dur;
+                return { 
+                    id: prefix + "-" + sId, 
+                    sId, 
+                    rest, 
+                    pkg: isOverMax ? "WP RESET" : step.pkg, 
+                    dur, 
+                    warn: cfg.warn, 
+                    crit: cfg.crit, 
+                    isReset: isOverMax, 
+                    rawTotal: aktuellerStand 
+                };
+            }
+            return null;
+        }).filter(m => m !== null).sort((a, b) => a.rest - b.rest);
+
+        // Anzeige updaten
+        const badge = totalMin > 0 ? `<span class="time-badge">⏳ ${formatTotalTime(totalMin)}</span>` : "";
+        document.getElementById(countId).innerHTML = `<span>${data.length}</span> ${badge}`;
+        
+        // Liste rendern (wie gehabt)
         document.getElementById(listId).innerHTML = data.map(m => {
-            const ass = state.assignments[prefix+m.sId] || "";
+            const ass = state.assignments[prefix + m.sId] || "";
             const isW = ass !== "";
-            let cls = 'warning'; if(m.rest <= 0) cls='overdue'; else if(m.rest < m.crit) cls='critical';
+            let cls = 'warning'; 
+            if (m.rest <= 0) cls = 'overdue'; 
+            else if (m.rest <= m.crit) cls = 'critical';
+
             return `
-            <div class="card ${cls} ${isW?'in-progress':''}">
+            <div class="card ${cls} ${isW ? 'in-progress' : ''}">
                 <div class="card-info">
                     <div><div class="m-id">${m.id}</div><div class="m-paket">${m.pkg}</div><div class="m-time">⏱ ${m.dur} Min.</div></div>
                     <div class="m-rest">${m.rest.toLocaleString()}</div>
                 </div>
                 <div class="card-actions">
-                    <select ${!auth.currentUser?'disabled':''} onchange="handleEinstellerChange('${prefix}', '${m.sId}', this.value)">
+                    <select ${!auth.currentUser ? 'disabled' : ''} onchange="handleEinstellerChange('${prefix}', '${m.sId}', this.value)">
                         <option value="">-- Einsteller --</option>
-                        ${(state.config.einstellerListe||[]).map(e => `<option value="${e}" ${ass===e?'selected':''}>${e}</option>`).join('')}
+                        ${(state.config.einstellerListe || []).map(e => `<option value="${e}" ${ass === e ? 'selected' : ''}>${e}</option>`).join('')}
                     </select>
-                    <button class="${m.isReset?'btn-done reset-mode':'btn-done'}" ${!auth.currentUser?'disabled':''} onclick="confirmMaint('${prefix}','${m.sId}',${m.isReset},${m.rawTotal})">${m.isReset?'🔄 Reset':'✅ OK'}</button>
+                    <button class="${m.isReset ? 'btn-done reset-mode' : 'btn-done'}" ${!auth.currentUser ? 'disabled' : ''} onclick="confirmMaint('${prefix}','${m.sId}',${m.isReset},${m.rawTotal})">${m.isReset ? '🔄 Reset' : '✅ OK'}</button>
                 </div>
             </div>`;
         }).join('');

@@ -115,10 +115,23 @@
 
         renderCol('list-he', 'count-he', state.he, 'H', state.maintConfig.he); 
 
-        // Gesamtstunden anzeigen
-        const h = Math.floor(totalOffenMinuten / 60);
-        const m = totalOffenMinuten % 60;
-        document.getElementById('overall-workload').innerText = `Wartungsaufwand: ${h}h ${m}m`;
+        // Berechnung für 24h-Schichtbetrieb
+        const gesamtMinuten = totalOffenMinuten;
+        const tage = Math.floor(gesamtMinuten / 1440); // 1440 min = 24h
+        const restMinutenNachTagen = gesamtMinuten % 1440;
+        const stunden = Math.floor(restMinutenNachTagen / 60);
+        const minuten = restMinutenNachTagen % 60;
+        
+        let zeitAnzeige = "";
+        if (tage > 0) {
+            zeitAnzeige += tage + "d ";
+        }
+        if (stunden > 0 || tage > 0) {
+            zeitAnzeige += stunden + "h ";
+        }
+        zeitAnzeige += minuten + "m";
+        
+        document.getElementById('overall-workload').innerText = `Wartungsaufwand: ${zeitAnzeige}`;
     }
 
     function renderCol(listId, countId, raw, prefix, cfg) {

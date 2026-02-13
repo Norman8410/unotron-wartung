@@ -2,8 +2,8 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <!-- TODO 1: Titel anpassen (z.B. "Ministar Wartung") -->
-    <title>Wartung nach Kalenderwoche - Detailansicht</title>
+    <!-- TODO 1: Titel anpassen -->
+    <title>Waschanlagen Wartung - Detailansicht</title>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
@@ -32,8 +32,8 @@
 </head>
 <body onmousemove="resetTimer()">
 
-<!-- TODO 2: Überschrift anpassen (z.B. "Ministar Wartungsübersicht") -->
-<div class="top-bar">Wartungsübersicht nach Kalenderwoche</div>
+<!-- TODO 2: Überschrift anpassen -->
+<div class="top-bar">Linienwaschanlage Silberhorn - Wartungsübersicht</div>
 <div class="header">
     <div><span style="font-size: 24px; color: var(--bosch-red); font-weight: 900;">BOSCH</span></div>
     <button style="padding: 8px 15px; cursor: pointer; border: 1px solid #ccc; background: white; font-weight: bold; color: var(--bosch-blue);" onclick="window.close()">❌ Schließen</button>
@@ -56,13 +56,12 @@
     
     let chart = null, currentUser = null, inactivityTimer, config = null;
 
-    // TODO 3: Diese drei Konstanten für jede neue Maschine anpassen
-    // Beispiel für "Linienwaschanlage Silberhorn"
-    const MACHINE_KEY = "silberhorn"; // Eindeutiger Schlüssel für Firebase (z.B. "ministar", "oellager")
-    const MACHINE_PREFIX = "S-";       // Kürzel für die Anzeige in der Liste (z.B. "M-", "Lager-")
-    const PAGE_FILENAME = "wartung-kw.html"; // Dateiname für das Logging
-
-    // --- Ab hier muss nichts mehr geändert werden ---
+    // TODO 3: Firebase-Pfade und Maschinen-Präfix anpassen
+    const MACHINE_KEY = "silberhorn"; // Eindeutiger Schlüssel für diese Maschine/Gruppe
+    const MACHINE_PREFIX = "S-";       // Kürzel für die Anzeige (z.B. S-1, S-2)
+    const CONFIG_PATH = `maintenanceConfig/${MACHINE_KEY}`;
+    const STATE_PATH = `maintenanceState/${MACHINE_KEY}`;
+    const PAGE_FILENAME = "waschanlagen.html"; // Für das Logging
 
     function resetTimer() {
         clearTimeout(inactivityTimer);
@@ -74,13 +73,14 @@
         await db.ref('logs').push({
             zeit: new Date().toLocaleString('de-DE'),
             user: auth.currentUser.email,
-            seite: `${PAGE_FILENAME} (${MACHINE_KEY})`, // Zur besseren Zuordnung
+            seite: PAGE_FILENAME,
             aktion: action,
             maschine: `${MACHINE_PREFIX}${machineId}`,
             info: details
         });
     }
 
+    // Funktion zur Berechnung der Dauer aus den Wartungspaketen
     function getDuration(pkgString, timeTable) {
         if (!pkgString || pkgString.includes("RESET") || !timeTable) return 0;
         return pkgString.split(/[\s\/,]+/).reduce((acc, p) => {
@@ -90,6 +90,7 @@
         }, 0);
     }
     
+    // NEU: Funktion zur Ermittlung der aktuellen Kalenderwoche
     function getCalendarWeek() {
         const date = new Date();
         date.setHours(0, 0, 0, 0);
@@ -104,20 +105,17 @@
     });
 
     function loadData() {
-        const CONFIG_PATH = `maintenanceConfig/${MACHINE_KEY}`;
-        const STATE_PATH = `maintenanceState/${MACHINE_KEY}`;
-
         db.ref(CONFIG_PATH).on('value', cfgSnap => {
             config = cfgSnap.val();
             if (!config) {
-                document.getElementById('machineList').innerHTML = `Fehler: Keine Konfiguration unter ${CONFIG_PATH} gefunden. Bitte in Firebase anlegen.`;
+                document.getElementById('machineList').innerHTML = `Fehler: Keine Konfiguration unter ${CONFIG_PATH} gefunden.`;
                 return;
             }
 
             db.ref(STATE_PATH).on('value', snap => {
                 const state = snap.val() || {};
-                const cycles = state.extraCycles || {};
-                const machineIds = config.machines || ["1"]; // Holt die Maschinen-IDs aus der Config
+                const cycles = state.extraCycles || {}; // Zyklen für jede einzelne Maschine
+                const machineIds = config.machines || ["1"]; // Annahme: Es gibt Maschinen "1" und "2" laut CSV
                 const currentWeek = getCalendarWeek();
 
                 const data = machineIds.map(id => {
@@ -151,7 +149,7 @@
                     <b>${MACHINE_PREFIX}${d.id}</b> <span style="font-size:0.8em; color:#666;">(Schritt: ${d.cyc + 1})</span><br>
                     <small style="color:var(--bosch-red); font-weight:bold">${d.pkg} ${d.duration > 0 ? '(' + d.duration + ' Min.)' : ''}</small>
                 </div>
-                <div style="flex:1; text-align:right;">Rest: <b>${d.rest > 0 ? d.rest : 'Fällig'}</b></div>
+                <div style="flex:1; text-align:right;">Rest: <b>${d.rest} Wochen</b></div>
                 <div style="display:${currentUser ? 'flex' : 'none'}; gap:5px;">
                     ${d.needsReset ? 
                         `<button class="btn-reset-auto" onclick="resetCycle('${d.id}')">RESET</button>` :
@@ -163,7 +161,7 @@
 
     async function advanceCycle(id) {
         if(!confirm(`Wartung für ${MACHINE_PREFIX}${id} als erledigt markieren?`)) return;
-        const ref = db.ref(`maintenanceState/${MACHINE_KEY}/extraCycles/${id}`);
+        const ref = db.ref(`${STATE_PATH}/extraCycles/${id}`);
         const snap = await ref.once('value');
         const next = (snap.val() || 0) + 1;
         await ref.set(next);
@@ -172,7 +170,7 @@
 
     async function resetCycle(id) {
         if(!confirm(`Jahres-Reset für ${MACHINE_PREFIX}${id} bestätigen?`)) return;
-        await db.ref(`maintenanceState/${MACHINE_KEY}/extraCycles/${id}`).set(0);
+        await db.ref(`${STATE_PATH}/extraCycles/${id}`).set(0);
         await writeLog("RESET", id, `Zyklus auf 0 zurückgesetzt.`);
     }
 

@@ -171,12 +171,18 @@
 }
 
 function renderColTime(listId, countId, raw, prefix, cfg) {
-    if(!raw || !raw.cloudRawData) return 0;
+    if (!raw || !raw.cloudRawData) return 0;
     let colMin = 0;
     const currentWeek = getCW(new Date());
 
-    // Daten aufbereiten
-    const items = Object.entries(raw.cloudRawData).map(([sId, mData]) => {
+    // 1. Daten in ein einheitliches Array umwandeln (egal ob Objekt oder Array)
+    const sourceData = Array.isArray(raw.cloudRawData) 
+        ? raw.cloudRawData.map(item => ({ id: item.StationNo || item.STATIONNO, ...item }))
+        : Object.entries(raw.cloudRawData).map(([id, data]) => ({ id, ...data }));
+
+    // 2. Berechnungen durchführen
+    const items = sourceData.map(mData => {
+        const sId = mData.id;
         const lastW = mData.lastWartungKW || 0;
         const cyc = mData.extraCycles || 0;
         const step = (cfg.steps && cfg.steps[cyc]) || { interval: 52, pkg: "RESET" };
@@ -187,16 +193,20 @@ function renderColTime(listId, countId, raw, prefix, cfg) {
         return { sId, rest, pkg: step.pkg, dur, targetWeek };
     }).filter(item => item.rest <= (cfg.warn || 4));
 
-    // Sortierung nach Dringlichkeit
+    // 3. Nach Dringlichkeit sortieren (kleinster rest-Wert zuerst)
     items.sort((a, b) => a.rest - b.rest);
 
-    // HTML generieren
+    // 4. HTML generieren mit deiner gewünschten KW-Logik
     const html = items.map(item => {
         colMin += item.dur;
-        // Erstellt den Text: "Fällig KW 9 / Aktuell KW 8" oder "Seit KW 7 / Aktuell KW 8"
-        const kwInfo = (item.rest < 0 ? `Seit KW ${item.targetWeek}` : `Fällig KW ${item.targetWeek}`) + ` (Aktuell ${currentWeek})`;
         
-        return buildCard(prefix, item.sId, item.rest, item.pkg, item.dur, false, kwInfo);
+        // Deine Logik: "Fällig KW X" (Zukunft/Gegenwart) oder "Seit KW X" (Vergangenheit)
+        const statusText = item.rest < 0 
+            ? `Seit KW ${item.targetWeek}` 
+            : `Fällig KW ${item.targetWeek}`;
+        const infoString = `${statusText} (Aktuell: KW ${currentWeek})`;
+
+        return buildCard(prefix, item.sId, item.rest, item.pkg, item.dur, false, infoString);
     }).join('');
 
     document.getElementById(listId).innerHTML = html || '<div class="no-data">Alles i.O.</div>';

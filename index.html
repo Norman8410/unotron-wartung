@@ -170,41 +170,45 @@
     return colMin;
 }
 
-function renderColTime(listId, countId, raw, prefix, cfg) {
-    if (!raw || !raw.cloudRawData) return 0;
-    let colMin = 0;
-    const currentWeek = getCW(new Date());
-
-    // Wir verarbeiten die Daten direkt ohne zusätzliche Sortierung
-    const html = Object.entries(raw.cloudRawData).map(([sId, mData]) => {
-        const lastW = mData.lastWartungKW || 0;
-        const cyc = mData.extraCycles || 0;
-        const step = (cfg.steps && cfg.steps[cyc]) || { interval: 52, pkg: "RESET" };
-        const targetWeek = lastW + step.interval;
-        const rest = targetWeek - currentWeek;
-        const dur = getDuration(step.pkg, cfg.times);
-
-        // Nur fällige/nahe Termine anzeigen (Warnschwelle)
-        if (rest > (cfg.warn || 4)) return null;
-
-        colMin += dur;
-
-        // Deine gewünschte Logik für die Anzeige:
-        // Wenn rest < 0 -> Vergangenheit ("Seit KW X")
-        // Wenn rest >= 0 -> Gegenwart/Zukunft ("Fällig KW X")
-        const statusText = rest < 0 
-            ? `Seit KW ${targetWeek}` 
-            : `Fällig KW ${targetWeek}`;
-        
-        const infoString = `${statusText} (Aktuell: KW ${currentWeek})`;
-
-        return buildCard(prefix, sId, rest, step.pkg, dur, false, infoString);
-    }).filter(x => x).join('');
-
-    document.getElementById(listId).innerHTML = html || '<div class="no-data">Alles i.O.</div>';
-    document.getElementById(countId).innerHTML = `<span class="time-badge">${formatTime(colMin)}</span>`;
-    return colMin;
-}
+    function renderColKw(listId, countId, keys) {
+        let colMin = 0; 
+        const week = getWeek(); 
+        const html = keys.map(key => {
+            const cfg = state.maintConfig[key]; if(!cfg) return '';
+            return (cfg.machines || []).map(id => {
+                const cyc = (state.maintenanceStateKW[key]?.extraCycles?.[id]) || 0;
+                const isReset = !(cfg.steps && cfg.steps[cyc]);
+                
+                const targetKW = isReset ? (cfg.yearlyResetWeek || 52) : cfg.steps[cyc].target;
+                const rest = targetKW - week;
+    
+                if (rest > (cfg.warnWeeks || 4)) return null;
+                
+                const dur = getDuration(isReset ? "RESET" : cfg.steps[cyc].pkg, cfg.times);
+                colMin += dur;
+    
+                const statusText = rest < 0 
+                    ? `fällig seit KW ${targetKW}` 
+                    : `fällig in KW ${targetKW}`;
+                
+                // Linksbündiges Layout mit optimierter Platznutzung
+                const combinedInfo = `
+                    <div style="text-align: left; padding-left: 5px;">
+                        <div style="font-weight: bold; font-size: 1.1em;">${cfg.prefix || ''}${id}</div>
+                        <div style="font-size: 0.75em; white-space: nowrap;">
+                            Aktuell: KW ${week} | ${statusText}
+                        </div>
+                    </div>
+                `;
+    
+                return buildCard('', '', combinedInfo, isReset ? "JAHRES-RESET" : cfg.steps[cyc].pkg, dur, isReset, null, key);
+            }).filter(x=>x).join('');
+        }).join('');
+    
+        document.getElementById(listId).innerHTML = html || '<div class="no-data">Alles i.O.</div>';
+        document.getElementById(countId).innerHTML = `<span class="time-badge">${formatTime(colMin)}</span>`;
+        return colMin;
+    }
 
     function buildCard(pre, id, rest, pkg, dur, isReset, rawTotal, kwKey) {
         const fullId = pre + id;

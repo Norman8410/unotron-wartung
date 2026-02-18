@@ -139,36 +139,36 @@
     }
 
     function renderCol(listId, countId, raw, prefix, cfg) {
-    if(!raw || !raw.cloudRawData) return 0;
-    let colMin = 0;
-    const offK = prefix==='A-'?'agieOffsets':(prefix==='H-'?'heOffsets':(prefix==='L-'?'laserOffsets':'unotronOffsets'));
-    
-    // Daten aufbereiten
-    const items = raw.cloudRawData.map(item => {
-        const sId = item.StationNo || item.STATIONNO;
-        const ist = (parseInt(item.Parts || item["COUNT(*)"]) || 0) - ((raw[offK] && raw[offK][sId]) || 0);
-        const cyc = (raw.extraCycles && raw.extraCycles[sId]) || 0;
-        const step = (cfg.steps && cfg.steps[cyc]) || { target: cfg.maxLimit, pkg: "RESET" };
-        const isReset = ist >= cfg.maxLimit || (cfg.steps && cyc >= cfg.steps.length);
-        const rest = (isReset ? cfg.maxLimit : step.target) - ist;
-        const dur = getDuration(isReset ? "RESET" : step.pkg, cfg.times);
+        if(!raw || !raw.cloudRawData) return 0;
+        let colMin = 0;
+        const offK = prefix==='A-'?'agieOffsets':(prefix==='H-'?'heOffsets':(prefix==='L-'?'laserOffsets':'unotronOffsets'));
         
-        return { sId, rest, pkg: isReset ? "WP RESET" : step.pkg, dur, isReset, totalParts: item.Parts || item["COUNT(*)"] };
-    }).filter(item => item.rest <= (cfg.warn || 5000)); // Nur anzeigen, was fällig/nah dran ist
-
-    // Sortierung nach Dringlichkeit
-    items.sort((a, b) => a.rest - b.rest);
-
-    // HTML generieren
-    const html = items.map(item => {
-        colMin += item.dur;
-        return buildCard(prefix, item.sId, item.rest, item.pkg, item.dur, item.isReset, item.totalParts);
-    }).join('');
-
-    document.getElementById(listId).innerHTML = html || '<div class="no-data">Alles i.O.</div>';
-    document.getElementById(countId).innerHTML = `<span class="time-badge">${formatTime(colMin)}</span>`;
-    return colMin;
-}
+        // Daten aufbereiten
+        const items = raw.cloudRawData.map(item => {
+            const sId = item.StationNo || item.STATIONNO;
+            const ist = (parseInt(item.Parts || item["COUNT(*)"]) || 0) - ((raw[offK] && raw[offK][sId]) || 0);
+            const cyc = (raw.extraCycles && raw.extraCycles[sId]) || 0;
+            const step = (cfg.steps && cfg.steps[cyc]) || { target: cfg.maxLimit, pkg: "RESET" };
+            const isReset = ist >= cfg.maxLimit || (cfg.steps && cyc >= cfg.steps.length);
+            const rest = (isReset ? cfg.maxLimit : step.target) - ist;
+            const dur = getDuration(isReset ? "RESET" : step.pkg, cfg.times);
+            
+            return { sId, rest, pkg: isReset ? "WP RESET" : step.pkg, dur, isReset, totalParts: item.Parts || item["COUNT(*)"] };
+        }).filter(item => item.rest <= (cfg.warn || 5000)); // Nur anzeigen, was fällig/nah dran ist
+    
+        // Sortierung nach Dringlichkeit
+        items.sort((a, b) => a.rest - b.rest);
+    
+        // HTML generieren
+        const html = items.map(item => {
+            colMin += item.dur;
+            return buildCard(prefix, item.sId, item.rest, item.pkg, item.dur, item.isReset, item.totalParts);
+        }).join('');
+    
+        document.getElementById(listId).innerHTML = html || '<div class="no-data">Alles i.O.</div>';
+        document.getElementById(countId).innerHTML = `<span class="time-badge">${formatTime(colMin)}</span>`;
+        return colMin;
+    }
 
     function renderColKw(listId, countId, keys) {
         let colMin = 0; 
@@ -187,11 +187,18 @@
                 const dur = getDuration(isReset ? "RESET" : cfg.steps[cyc].pkg, cfg.times);
                 colMin += dur;
     
+                // Farblogik festlegen
+                let urgentClass = '';
+                if (rest < 0) {
+                    urgentClass = 'overdue'; // Rot (Stil in deiner CSS meist .overdue)
+                } else if (rest === 0) {
+                    urgentClass = 'critical'; // Gelb (Stil in deiner CSS meist .critical)
+                }
+    
                 const statusText = rest < 0 
                     ? `fällig seit KW ${targetKW}` 
                     : `fällig in KW ${targetKW}`;
                 
-                // Linksbündiges Layout mit optimierter Platznutzung
                 const combinedInfo = `
                     <div style="text-align: left; padding-left: 5px;">
                         <div style="font-weight: bold; font-size: 1.1em;">${cfg.prefix || ''}${id}</div>
@@ -201,7 +208,8 @@
                     </div>
                 `;
     
-                return buildCard('', '', combinedInfo, isReset ? "JAHRES-RESET" : cfg.steps[cyc].pkg, dur, isReset, null, key);
+                // Wir übergeben die urgentClass an buildCard, damit die Karte die richtige Farbe bekommt
+                return buildCard('', '', combinedInfo, isReset ? "JAHRES-RESET" : cfg.steps[cyc].pkg, dur, isReset, null, key, urgentClass);
             }).filter(x=>x).join('');
         }).join('');
     
@@ -210,20 +218,27 @@
         return colMin;
     }
 
-    function buildCard(pre, id, rest, pkg, dur, isReset, rawTotal, kwKey) {
+    function buildCard(pre, id, rest, pkg, dur, isReset, rawTotal, kwKey, urgentClass) {
         const fullId = pre + id;
         const ass = state.assignments[fullId] || "";
-        const cls = parseInt(rest) <= 0 ? 'overdue' : 'warning';
+        
+        // Die Farbe wird nun primär über urgentClass (aus der render-Funktion) gesteuert,
+        // ansonsten fällt sie auf den Standard (overdue/warning) zurück.
+        const cls = urgentClass ? urgentClass : (parseInt(rest) <= 0 ? 'overdue' : 'warning');
+    
         return `<div class="card ${cls} ${ass ? 'in-progress' : ''}">
-            <div class="card-info"><div class="m-id">${fullId}</div><div class="m-rest">${rest}</div></div>
-            <div style="font-size:0.85em; margin-bottom:5px;">${pkg} (ca. ${dur}m)</div>
+            <div class="card-info" style="display: block; text-align: left; padding: 2px 5px;">
+                <div class="m-id" style="font-weight: bold; font-size: 1.1em;">${fullId || rest}</div>
+                ${fullId ? `<div class="m-rest" style="font-size: 0.75em; margin-top: 2px;">${rest}</div>` : ''}
+            </div>
+            <div style="font-size:0.85em; margin: 5px 5px; text-align: left;">${pkg} (ca. ${dur}m)</div>
             <div class="card-actions">
                 <select onchange="db.ref('assignments/${fullId}').set(this.value)">
                     <option value="">--</option>
                     ${(state.config.einstellerListe || []).map(e => `<option value="${e}" ${ass===e?'selected':''}>${e}</option>`).join('')}
                 </select>
                 <button class="btn-done ${isReset?'reset-mode':''}" ${!auth.currentUser || !ass ? 'disabled' : ''} 
-                    onclick="handleMaint('${pre}','${id}',${isReset},${rawTotal},'${kwKey}')">${isReset?'🔄':'✅'}</button>
+                    onclick="handleMaint('${pre}','${id}',${isReset},${rawTotal},${kwKey ? `'${kwKey}'` : 'null'})">${isReset?'🔄':'✅'}</button>
             </div>
         </div>`;
     }

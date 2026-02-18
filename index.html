@@ -172,20 +172,33 @@
         return colMin;
     }
 
-    function renderColKw(listId, countId, keys) {
-        let colMin = 0; const week = getWeek();
-        const html = keys.map(key => {
-            const cfg = state.maintConfig[key]; if(!cfg) return '';
-            return (cfg.machines || []).map(id => {
-                const cyc = (state.maintenanceStateKW[key]?.extraCycles?.[id]) || 0;
-                const isReset = !(cfg.steps && cfg.steps[cyc]);
-                const rest = (isReset ? (cfg.yearlyResetWeek || 52) : cfg.steps[cyc].target) - week;
-                if (rest > (cfg.warnWeeks || 4)) return null;
-                const dur = getDuration(isReset ? "RESET" : cfg.steps[cyc].pkg, cfg.times);
-                colMin += dur;
-                return buildCard(cfg.prefix || '', id, rest + " Wo", isReset ? "JAHRES-RESET" : cfg.steps[cyc].pkg, dur, isReset, null, key);
-            }).filter(x=>x).join('');
-        }).join('');
+    function renderColTime(listId, countId, raw, prefix, cfg) {
+        if(!raw.cloudRawData) return 0;
+        let colMin = 0;
+        const currentWeek = getCW(new Date());
+
+        // 1. Daten vorbereiten und Berechnungen durchführen
+        const items = Object.entries(raw.cloudRawData).map(([sId, mData]) => {
+            const lastW = mData.lastWartungKW || 0;
+            const cyc = mData.extraCycles || 0;
+            const step = (cfg.steps && cfg.steps[cyc]) || { interval: 52, pkg: "RESET" };
+            const targetWeek = lastW + step.interval;
+            const rest = targetWeek - currentWeek;
+            const dur = getDuration(step.pkg, cfg.times);
+
+            return { sId, rest, pkg: step.pkg, dur, targetWeek };
+        });
+
+        // 2. Sortieren nach Dringlichkeit (kleinster rest-Wert/Wochen oben)
+        items.sort((a, b) => a.rest - b.rest);
+
+        // 3. HTML generieren
+        const html = items.map(item => {
+            if (item.rest > (cfg.warn || 4)) return null;
+            colMin += item.dur;
+            return buildCard(prefix, item.sId, item.rest, item.pkg, item.dur, false, "KW " + item.targetWeek);
+        }).filter(x => x).join('');
+
         document.getElementById(listId).innerHTML = html || '<div class="no-data">Alles i.O.</div>';
         document.getElementById(countId).innerHTML = `<span class="time-badge">${formatTime(colMin)}</span>`;
         return colMin;

@@ -175,14 +175,8 @@ function renderColTime(listId, countId, raw, prefix, cfg) {
     let colMin = 0;
     const currentWeek = getCW(new Date());
 
-    // 1. Daten in ein einheitliches Array umwandeln (egal ob Objekt oder Array)
-    const sourceData = Array.isArray(raw.cloudRawData) 
-        ? raw.cloudRawData.map(item => ({ id: item.StationNo || item.STATIONNO, ...item }))
-        : Object.entries(raw.cloudRawData).map(([id, data]) => ({ id, ...data }));
-
-    // 2. Berechnungen durchführen
-    const items = sourceData.map(mData => {
-        const sId = mData.id;
+    // Wir verarbeiten die Daten direkt ohne zusätzliche Sortierung
+    const html = Object.entries(raw.cloudRawData).map(([sId, mData]) => {
         const lastW = mData.lastWartungKW || 0;
         const cyc = mData.extraCycles || 0;
         const step = (cfg.steps && cfg.steps[cyc]) || { interval: 52, pkg: "RESET" };
@@ -190,24 +184,22 @@ function renderColTime(listId, countId, raw, prefix, cfg) {
         const rest = targetWeek - currentWeek;
         const dur = getDuration(step.pkg, cfg.times);
 
-        return { sId, rest, pkg: step.pkg, dur, targetWeek };
-    }).filter(item => item.rest <= (cfg.warn || 4));
+        // Nur fällige/nahe Termine anzeigen (Warnschwelle)
+        if (rest > (cfg.warn || 4)) return null;
 
-    // 3. Nach Dringlichkeit sortieren (kleinster rest-Wert zuerst)
-    items.sort((a, b) => a.rest - b.rest);
+        colMin += dur;
 
-    // 4. HTML generieren mit deiner gewünschten KW-Logik
-    const html = items.map(item => {
-        colMin += item.dur;
+        // Deine gewünschte Logik für die Anzeige:
+        // Wenn rest < 0 -> Vergangenheit ("Seit KW X")
+        // Wenn rest >= 0 -> Gegenwart/Zukunft ("Fällig KW X")
+        const statusText = rest < 0 
+            ? `Seit KW ${targetWeek}` 
+            : `Fällig KW ${targetWeek}`;
         
-        // Deine Logik: "Fällig KW X" (Zukunft/Gegenwart) oder "Seit KW X" (Vergangenheit)
-        const statusText = item.rest < 0 
-            ? `Seit KW ${item.targetWeek}` 
-            : `Fällig KW ${item.targetWeek}`;
         const infoString = `${statusText} (Aktuell: KW ${currentWeek})`;
 
-        return buildCard(prefix, item.sId, item.rest, item.pkg, item.dur, false, infoString);
-    }).join('');
+        return buildCard(prefix, sId, rest, step.pkg, dur, false, infoString);
+    }).filter(x => x).join('');
 
     document.getElementById(listId).innerHTML = html || '<div class="no-data">Alles i.O.</div>';
     document.getElementById(countId).innerHTML = `<span class="time-badge">${formatTime(colMin)}</span>`;
